@@ -113,50 +113,104 @@ else
 	PARALLEL=$(lscpu --parse=cpu | grep -v "#" | wc -l)
 	echo "parallel data chunks: $PARALLEL"
 
-	# Лимит одновременных COPY = 80% от max_connections (запас под системные сессии).
+	# Лимит одновременных COPY: min(80% max_connections, число CPU).
 	MAX_CONN=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "SHOW max_connections;")
-	MAX_JOBS=$(( MAX_CONN * 80 / 100 ))
-	if [ "$MAX_JOBS" -lt 1 ]; then
-		MAX_JOBS=1
+	CPU_COUNT=$(nproc)
+	MAX_BY_CONN=$(( MAX_CONN * 80 / 100 ))
+	[ "$MAX_BY_CONN" -lt 1 ] && MAX_BY_CONN=1
+	[ "$CPU_COUNT" -lt 1 ] && CPU_COUNT=1
+	if [ "$MAX_BY_CONN" -lt "$CPU_COUNT" ]; then
+		MAX_JOBS=$MAX_BY_CONN
+	else
+		MAX_JOBS=$CPU_COUNT
 	fi
-	echo "max_connections: $MAX_CONN, parallel COPY limit: $MAX_JOBS (80%)"
+	echo "max_connections: $MAX_CONN, cpus: $CPU_COUNT, parallel COPY limit: $MAX_JOBS"
 
-	# PostgreSQL: таблицы грузятся параллельно, но не больше MAX_JOBS одновременно.
-	# Greenplum остаётся последовательным (gpfdist/INSERT выше).
-	fail=0
-	active=0
-	echo "Starting parallel COPY for all tables..."
+	# Очередь чанков: крупные таблицы первыми.
+	# Пул всегда заполнен до MAX_JOBS, пока есть работа.
+	declare -A TABLE_SIZE
+	table_entries=()
+	total_size=0
 	for i in $(ls $PWD/*.$filter.*.sql); do
 		short_i=$(basename $i)
 		id=$(echo $short_i | awk -F '.' '{print $1}')
 		schema_name=$(echo $short_i | awk -F '.' '{print $2}')
 		table_name=$(echo $short_i | awk -F '.' '{print $3}')
+		sz=0
 		for p in $(seq 1 $PARALLEL); do
 			raw_filename=$PGDATA/arenadata_$p/"$table_name"_"$p"_"$PARALLEL".dat
 			if [[ -f $raw_filename && -s $raw_filename ]]; then
-				# ждём свободный слот в пуле
-				while [ "$active" -ge "$MAX_JOBS" ]; do
-					if wait -n; then
-						:
-					else
-						fail=1
-					fi
-					active=$((active - 1))
-				done
-				echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename=\"'$raw_filename'\" | grep COPY | awk -F ' ' '{print \$2}'"
-				(
-					start_log
-					filename="'""$raw_filename""'"
-					tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
-					log $tuples
-				) &
-				active=$((active + 1))
+				fsz=$(stat -c%s "$raw_filename")
+				sz=$((sz + fsz))
+			fi
+		done
+		if [ "$sz" -gt 0 ]; then
+			TABLE_SIZE[$table_name]=$sz
+			total_size=$((total_size + sz))
+			table_entries+=("$table_name|$i|$id|$schema_name")
+		fi
+	done
+
+	if [ "$total_size" -eq 0 ]; then
+		echo "ERROR: no non-empty .dat files found under $PGDATA/arenadata_*"
+		exit 1
+	fi
+
+	mapfile -t sorted_entries < <(
+		for entry in "${table_entries[@]}"; do
+			table_name=${entry%%|*}
+			printf '%s|%s\n' "${TABLE_SIZE[$table_name]}" "$entry"
+		done | sort -t'|' -k1,1nr | cut -d'|' -f2-
+	)
+
+	echo "Load order (largest first):"
+	for entry in "${sorted_entries[@]}"; do
+		IFS='|' read -r table_name sql_file id schema_name <<<"$entry"
+		echo "  $table_name: size=${TABLE_SIZE[$table_name]}"
+	done
+
+	pending=()
+	for entry in "${sorted_entries[@]}"; do
+		IFS='|' read -r table_name sql_file id schema_name <<<"$entry"
+		for p in $(seq 1 $PARALLEL); do
+			raw_filename=$PGDATA/arenadata_$p/"$table_name"_"$p"_"$PARALLEL".dat
+			if [[ -f $raw_filename && -s $raw_filename ]]; then
+				pending+=("$table_name|$sql_file|$id|$schema_name|$raw_filename")
 			fi
 		done
 	done
+	echo "COPY jobs queued: ${#pending[@]}"
 
-	echo "Waiting for remaining parallel COPY jobs to finish ($active active)..."
-	while [ "$active" -gt 0 ]; do
+	fail=0
+	active=0
+	qi=0
+	njobs=${#pending[@]}
+
+	echo "Starting parallel COPY (keep $MAX_JOBS jobs busy until queue is empty)..."
+	while [ "$qi" -lt "$njobs" ] || [ "$active" -gt 0 ]; do
+		while [ "$active" -lt "$MAX_JOBS" ] && [ "$qi" -lt "$njobs" ]; do
+			job=${pending[$qi]}
+			qi=$((qi + 1))
+			IFS='|' read -r table_name sql_file id schema_name raw_filename <<<"$job"
+			active=$((active + 1))
+			echo "[LAUNCH] $table_name $(basename "$raw_filename") active=$active/$MAX_JOBS left=$((njobs - qi))"
+			(
+				start_log
+				i=$sql_file
+				schema_name=$schema_name
+				table_name=$table_name
+				filename="'""$raw_filename""'"
+				tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -f $sql_file -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
+				# только в лог-файл шага; в stdout — короткая метка DONE
+				log $tuples >/dev/null
+				echo "[DONE] $table_name $(basename "$raw_filename") tuples=$tuples"
+			) &
+		done
+
+		if [ "$active" -eq 0 ]; then
+			break
+		fi
+
 		if wait -n; then
 			:
 		else
@@ -164,12 +218,14 @@ else
 		fi
 		active=$((active - 1))
 	done
+
 	if [ "$fail" -ne 0 ]; then
 		echo "ERROR: one or more parallel COPY jobs failed"
 		exit 1
 	fi
 	echo "All parallel COPY jobs finished successfully."
 fi
+
 
 max_id=$(ls $PWD/*.sql | tail -1)
 i=$(basename $max_id | awk -F '.' '{print $1}' | sed 's/^0*//')
