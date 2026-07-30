@@ -126,9 +126,13 @@ else
 	fi
 	echo "max_connections: $MAX_CONN, cpus: $CPU_COUNT, parallel COPY limit: $MAX_JOBS"
 
-	# Очередь чанков: крупные таблицы первыми.
-	# Пул всегда заполнен до MAX_JOBS, пока есть работа.
+	# Планировщик: держим MAX_JOBS занятыми, но предпочитаем РАЗНЫЕ таблицы
+	# (минимум активных COPY на таблицу), чтобы не биться в relation extension lock.
+	# Второй чанк в ту же таблицу — только если свободных таблиц уже нет.
 	declare -A TABLE_SIZE
+	declare -A TABLE_ACTIVE
+	declare -A PID_TABLE
+
 	table_entries=()
 	total_size=0
 	for i in $(ls $PWD/*.$filter.*.sql); do
@@ -146,6 +150,7 @@ else
 		done
 		if [ "$sz" -gt 0 ]; then
 			TABLE_SIZE[$table_name]=$sz
+			TABLE_ACTIVE[$table_name]=0
 			total_size=$((total_size + sz))
 			table_entries+=("$table_name|$i|$id|$schema_name")
 		fi
@@ -156,21 +161,14 @@ else
 		exit 1
 	fi
 
-	mapfile -t sorted_entries < <(
-		for entry in "${table_entries[@]}"; do
-			table_name=${entry%%|*}
-			printf '%s|%s\n' "${TABLE_SIZE[$table_name]}" "$entry"
-		done | sort -t'|' -k1,1nr | cut -d'|' -f2-
-	)
-
-	echo "Load order (largest first):"
-	for entry in "${sorted_entries[@]}"; do
+	echo "Tables to load:"
+	for entry in "${table_entries[@]}"; do
 		IFS='|' read -r table_name sql_file id schema_name <<<"$entry"
 		echo "  $table_name: size=${TABLE_SIZE[$table_name]}"
 	done
 
 	pending=()
-	for entry in "${sorted_entries[@]}"; do
+	for entry in "${table_entries[@]}"; do
 		IFS='|' read -r table_name sql_file id schema_name <<<"$entry"
 		for p in $(seq 1 $PARALLEL); do
 			raw_filename=$PGDATA/arenadata_$p/"$table_name"_"$p"_"$PARALLEL".dat
@@ -183,38 +181,70 @@ else
 
 	fail=0
 	active=0
-	qi=0
-	njobs=${#pending[@]}
 
-	echo "Starting parallel COPY (keep $MAX_JOBS jobs busy until queue is empty)..."
-	while [ "$qi" -lt "$njobs" ] || [ "$active" -gt 0 ]; do
-		while [ "$active" -lt "$MAX_JOBS" ] && [ "$qi" -lt "$njobs" ]; do
-			job=${pending[$qi]}
-			qi=$((qi + 1))
-			IFS='|' read -r table_name sql_file id schema_name raw_filename <<<"$job"
-			active=$((active + 1))
-			echo "[LAUNCH] $table_name $(basename "$raw_filename") active=$active/$MAX_JOBS left=$((njobs - qi))"
-			(
-				start_log
-				i=$sql_file
-				schema_name=$schema_name
-				table_name=$table_name
-				filename="'""$raw_filename""'"
-				tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -f $sql_file -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
-				# только в лог-файл шага; в stdout — короткая метка DONE
-				log $tuples >/dev/null
-				echo "[DONE] $table_name $(basename "$raw_filename") tuples=$tuples"
-			) &
+	launch_one()
+	{
+		local idx job table_name sql_file id schema_name raw_filename
+		local best_idx=-1 best_active=999999 best_size=-1 ta sz
+
+		for idx in "${!pending[@]}"; do
+			job=${pending[$idx]}
+			table_name=${job%%|*}
+			ta=${TABLE_ACTIVE[$table_name]:-0}
+			sz=${TABLE_SIZE[$table_name]:-0}
+			# 1) меньше активных COPY на таблицу
+			# 2) при равенстве — более крупная таблица
+			if [ "$ta" -lt "$best_active" ] || { [ "$ta" -eq "$best_active" ] && [ "$sz" -gt "$best_size" ]; }; then
+				best_idx=$idx
+				best_active=$ta
+				best_size=$sz
+			fi
+		done
+
+		[ "$best_idx" -lt 0 ] && return 1
+
+		job=${pending[$best_idx]}
+		IFS='|' read -r table_name sql_file id schema_name raw_filename <<<"$job"
+		unset "pending[$best_idx]"
+		pending=("${pending[@]}")
+
+		active=$((active + 1))
+		TABLE_ACTIVE[$table_name]=$(( ${TABLE_ACTIVE[$table_name]:-0} + 1 ))
+		echo "[LAUNCH] $table_name $(basename "$raw_filename") table_active=${TABLE_ACTIVE[$table_name]} pool=$active/$MAX_JOBS left=${#pending[@]}"
+		(
+			start_log
+			i=$sql_file
+			schema_name=$schema_name
+			table_name=$table_name
+			filename="'""$raw_filename""'"
+			tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -f $sql_file -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
+			log $tuples >/dev/null
+			echo "[DONE] $table_name $(basename "$raw_filename") tuples=$tuples"
+		) &
+		PID_TABLE[$!]=$table_name
+		return 0
+	}
+
+	echo "Starting parallel COPY (prefer different tables, keep $MAX_JOBS busy)..."
+	while [ ${#pending[@]} -gt 0 ] || [ "$active" -gt 0 ]; do
+		while [ "$active" -lt "$MAX_JOBS" ] && [ ${#pending[@]} -gt 0 ]; do
+			launch_one || break
 		done
 
 		if [ "$active" -eq 0 ]; then
 			break
 		fi
 
-		if wait -n; then
+		finished_pid=""
+		if wait -n -p finished_pid; then
 			:
 		else
 			fail=1
+		fi
+		table_name=${PID_TABLE[$finished_pid]}
+		if [ -n "$table_name" ]; then
+			TABLE_ACTIVE[$table_name]=$(( TABLE_ACTIVE[$table_name] - 1 ))
+			unset "PID_TABLE[$finished_pid]"
 		fi
 		active=$((active - 1))
 	done
