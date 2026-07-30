@@ -111,11 +111,20 @@ else
 	fi
 
 	PARALLEL=$(lscpu --parse=cpu | grep -v "#" | wc -l)
-	echo "parallel: $PARALLEL"
+	echo "parallel data chunks: $PARALLEL"
 
-	# PostgreSQL: все таблицы и их файловые чанки грузятся параллельно.
+	# Лимит одновременных COPY = 80% от max_connections (запас под системные сессии).
+	MAX_CONN=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "SHOW max_connections;")
+	MAX_JOBS=$(( MAX_CONN * 80 / 100 ))
+	if [ "$MAX_JOBS" -lt 1 ]; then
+		MAX_JOBS=1
+	fi
+	echo "max_connections: $MAX_CONN, parallel COPY limit: $MAX_JOBS (80%)"
+
+	# PostgreSQL: таблицы грузятся параллельно, но не больше MAX_JOBS одновременно.
 	# Greenplum остаётся последовательным (gpfdist/INSERT выше).
-	pids=()
+	fail=0
+	active=0
 	echo "Starting parallel COPY for all tables..."
 	for i in $(ls $PWD/*.$filter.*.sql); do
 		short_i=$(basename $i)
@@ -125,6 +134,15 @@ else
 		for p in $(seq 1 $PARALLEL); do
 			raw_filename=$PGDATA/arenadata_$p/"$table_name"_"$p"_"$PARALLEL".dat
 			if [[ -f $raw_filename && -s $raw_filename ]]; then
+				# ждём свободный слот в пуле
+				while [ "$active" -ge "$MAX_JOBS" ]; do
+					if wait -n; then
+						:
+					else
+						fail=1
+					fi
+					active=$((active - 1))
+				done
 				echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename=\"'$raw_filename'\" | grep COPY | awk -F ' ' '{print \$2}'"
 				(
 					start_log
@@ -132,17 +150,19 @@ else
 					tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
 					log $tuples
 				) &
-				pids+=($!)
+				active=$((active + 1))
 			fi
 		done
 	done
 
-	echo "Waiting for all parallel COPY jobs to finish (${#pids[@]} jobs)..."
-	fail=0
-	for pid in "${pids[@]}"; do
-		if ! wait "$pid"; then
+	echo "Waiting for remaining parallel COPY jobs to finish ($active active)..."
+	while [ "$active" -gt 0 ]; do
+		if wait -n; then
+			:
+		else
 			fail=1
 		fi
+		active=$((active - 1))
 	done
 	if [ "$fail" -ne 0 ]; then
 		echo "ERROR: one or more parallel COPY jobs failed"
