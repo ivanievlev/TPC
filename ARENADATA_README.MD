@@ -4,6 +4,7 @@
 - Added support for Greenplum 7.x 
 - Changed compression options from quicklz to zstd
 - Added new parameters
+- Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
 
 ## Installation
 
