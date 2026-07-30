@@ -17,17 +17,22 @@ RUN_SQL_FROM_ROLE="${19}"
 REFERENCE_TABLE_TYPE="${20}"
 DROP_CACHE_BEFORE_EACH_SINGLE_QUERY="${21}"
 DBNAME=${27}
+STATEMENT_TIMEOUT=${28}
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
 	echo "You must provide the scale as a parameter in terms of Gigabytes, true/false to run queries with EXPLAIN ANALYZE option, true/false to use random distrbution, multi-user count, and the number of sql iterations."
 	echo "Example: ./rollout.sh 100 false false 5 1"
 	exit 1
 fi
+if [ -z "$STATEMENT_TIMEOUT" ]; then
+	STATEMENT_TIMEOUT="1h"
+fi
 
 step=sql
 init_log $step
 
-echo "SQL_ON_ERROR_STOP = $SQL_ON_ERROR_STOP" 
+echo "SQL_ON_ERROR_STOP = $SQL_ON_ERROR_STOP"
+echo "STATEMENT_TIMEOUT = $STATEMENT_TIMEOUT"
 if [ "$SQL_ON_ERROR_STOP" == "true" ]; then
 	ON_ERROR_STOP=1
 else
@@ -110,13 +115,13 @@ for i in $(ls $PWD/*.tpcds.*.sql); do
 		table_name=`echo $i | awk -F '.' '{print $3}'`
 		start_log
 		if [ "$EXPLAIN_ANALYZE" == "false" ]; then
-			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
-			tuples=$(psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l; exit ${PIPESTATUS[0]})
+			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"SET statement_timeout=$STATEMENT_TIMEOUT;\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
+			tuples=$(psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "SET statement_timeout='$STATEMENT_TIMEOUT';" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l; exit ${PIPESTATUS[0]})
 		else
 			myfilename=$(basename $i)
 			mylogfile=$PWD/../log/$myfilename.single.explain_analyze.log
-			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
-			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i > $mylogfile
+			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"SET statement_timeout=$STATEMENT_TIMEOUT;\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
+			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "SET statement_timeout='$STATEMENT_TIMEOUT';" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i > $mylogfile
 			tuples="0"
 		fi
 		log $tuples

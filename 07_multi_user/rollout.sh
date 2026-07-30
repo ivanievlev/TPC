@@ -9,6 +9,7 @@ MULTI_USER_COUNT=$4
 EXCLUDE_HEAVY_QUERIES=$7
 SQL_ON_ERROR_STOP=${10}
 DBNAME=${27}
+STATEMENT_TIMEOUT=${28}
 
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" ]]; then
@@ -16,6 +17,9 @@ if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTI
         echo "Example: ./rollout.sh 100 false false 5"
         echo "This will create 100 GB of data for this test, not run EXPLAIN ANALYZE, not use random distribution and use 5 sessions for the multi-user test."
         exit 1
+fi
+if [ -z "$STATEMENT_TIMEOUT" ]; then
+	STATEMENT_TIMEOUT="1h"
 fi
 
 if [ "$MULTI_USER_COUNT" -eq "0" ]; then
@@ -83,8 +87,8 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 
 	for x in $(seq 1 $MULTI_USER_COUNT); do
 		session_log=$PWD/../log/testing_session_$x.log
-		echo "$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $DBNAME"
-		$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME |& tee $session_log &
+		echo "$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT"
+		$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT |& tee $session_log &
 	done
 
 	sleep 60

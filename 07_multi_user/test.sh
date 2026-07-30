@@ -11,12 +11,16 @@ EXPLAIN_ANALYZE=$3
 EXCLUDE_HEAVY_QUERIES=$4
 SQL_ON_ERROR_STOP=$5
 DBNAME=$6
+STATEMENT_TIMEOUT=$7
 
 if [[ "$GEN_DATA_SCALE" == "" || "$session_id" == "" || "$EXPLAIN_ANALYZE" == "" ]]; then
 	echo "Error: you must provide the scale, the session id, and true/false to run explain analyze as parameters."
 	echo "Example: ./rollout.sh 3000 2 false"
 	echo "This will execute the TPC-DS queries for 3TB of data for session 2 and not run explain analyze."
 	exit 1
+fi
+if [ -z "$STATEMENT_TIMEOUT" ]; then
+	STATEMENT_TIMEOUT="1h"
 fi
 
 source_bashrc
@@ -150,14 +154,14 @@ for i in $(ls $sql_dir/*.sql); do
 	table_name=$(basename $i | awk -F '.' '{print $3}')
 
 	if [ "$EXPLAIN_ANALYZE" == "false" ]; then
-		echo "psql -d $DBNAME -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l"
-		tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l; exit ${PIPESTATUS[0]})
+		echo "psql -d $DBNAME -c \"SET statement_timeout=$STATEMENT_TIMEOUT;\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
+		tuples=$(psql -d $DBNAME -c "SET statement_timeout='$STATEMENT_TIMEOUT';" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l; exit ${PIPESTATUS[0]})
 		tuples=$(($tuples-1))
 	else
 		myfilename=$(basename $i)
 		mylogfile=$PWD/../log/"$session_id"".""$myfilename"".multi.explain_analyze.log"
-		echo "psql -d $DBNAME -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i"
-		psql -d $DBNAME -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i > $mylogfile
+		echo "psql -d $DBNAME -c \"SET statement_timeout=$STATEMENT_TIMEOUT;\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i"
+		psql -d $DBNAME -c "SET statement_timeout='$STATEMENT_TIMEOUT';" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i > $mylogfile
 		tuples="0"
 	fi
 		
