@@ -113,33 +113,42 @@ else
 	PARALLEL=$(lscpu --parse=cpu | grep -v "#" | wc -l)
 	echo "parallel: $PARALLEL"
 
+	# PostgreSQL: все таблицы и их файловые чанки грузятся параллельно.
+	# Greenplum остаётся последовательным (gpfdist/INSERT выше).
+	pids=()
+	echo "Starting parallel COPY for all tables..."
 	for i in $(ls $PWD/*.$filter.*.sql); do
 		short_i=$(basename $i)
 		id=$(echo $short_i | awk -F '.' '{print $1}')
 		schema_name=$(echo $short_i | awk -F '.' '{print $2}')
 		table_name=$(echo $short_i | awk -F '.' '{print $3}')
 		for p in $(seq 1 $PARALLEL); do
-			filename=$(echo $PGDATA/arenadata_$p/"$table_name"_"$p"_"$PARALLEL".dat)
-			if [[ -f $filename && -s $filename ]]; then
-				start_log
-				filename="'""$filename""'"
-				echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename=\"$filename\" | grep COPY | awk -F ' ' '{print \$2}'"
-				#tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
-				psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename="$filename" &
-
-				#log $tuples
+			raw_filename=$PGDATA/arenadata_$p/"$table_name"_"$p"_"$PARALLEL".dat
+			if [[ -f $raw_filename && -s $raw_filename ]]; then
+				echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename=\"'$raw_filename'\" | grep COPY | awk -F ' ' '{print \$2}'"
+				(
+					start_log
+					filename="'""$raw_filename""'"
+					tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -f $i -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
+					log $tuples
+				) &
+				pids+=($!)
 			fi
 		done
-	  echo ""
-    get_count_load_data
-    echo "Now loading $table_name data.  This make take a while."
-    echo -ne "Loading $table_name data"
-    while [ "$count" -gt "0" ]; do
-	    echo -ne "."
-	    sleep 5
-	    get_count_load_data
-    done
 	done
+
+	echo "Waiting for all parallel COPY jobs to finish (${#pids[@]} jobs)..."
+	fail=0
+	for pid in "${pids[@]}"; do
+		if ! wait "$pid"; then
+			fail=1
+		fi
+	done
+	if [ "$fail" -ne 0 ]; then
+		echo "ERROR: one or more parallel COPY jobs failed"
+		exit 1
+	fi
+	echo "All parallel COPY jobs finished successfully."
 fi
 
 max_id=$(ls $PWD/*.sql | tail -1)
