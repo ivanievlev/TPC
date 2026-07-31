@@ -88,6 +88,21 @@ get_version()
 		LARGE_STORAGE=""
 	fi
 }
+format_duration()
+{
+	# $1 = elapsed nanoseconds (Linux) or seconds (other)
+	local elapsed=$1
+	local s m
+	if [ "$OSVERSION" == "Linux" ]; then
+		s=$((elapsed/1000000000))
+		m=$(( (elapsed/1000000) % 1000 ))
+	else
+		s=$elapsed
+		m=0
+	fi
+	printf "%02d:%02d:%02d.%03d" "$((s/3600%24))" "$((s/60%60))" "$((s%60))" "$m"
+}
+
 init_log()
 {
 	if [ -f $LOCAL_PWD/log/end_$1.log ]; then
@@ -102,6 +117,16 @@ init_log()
 	#A bug when process expects rollout_sql.log occures and I replaced rm for empty 
 	> $LOCAL_PWD/log/$logfile
 	#rm -f $LOCAL_PWD/log/$logfile
+
+	# wall-clock старта шага (не путать с T из start_log/log по объектам)
+	STEP_NAME=$1
+	STEP_START_TS=$(date +%F_%T)
+	if [ "$OSVERSION" == "Linux" ]; then
+		STEP_START_NS="$(date +%s%N)"
+	else
+		STEP_START_NS="$(date +%s)"
+	fi
+	echo "Step $STEP_NAME started at $STEP_START_TS"
 }
 
 start_log()
@@ -120,10 +145,10 @@ log()
 	#duration
 	if [ "$OSVERSION" == "Linux" ]; then
 		T="$(($(date +%s%N)-T))"
-		# seconds
+		# whole seconds
 		S="$((T/1000000000))"
-		# milliseconds
-		M="$((T/1000000))"
+		# fractional milliseconds (0..999)
+		M="$(( (T/1000000) % 1000 ))"
 	else
 		#must be OSX which doesn't have nano-seconds
 		T="$(($(date +%s)-T))"
@@ -148,8 +173,31 @@ log()
 
 end_step()
 {
-	local logfile=end_$1.log
-	touch $LOCAL_PWD/log/$logfile
+	local step=$1
+	local end_file=$LOCAL_PWD/log/end_$step.log
+	local end_ts elapsed duration
+
+	end_ts=$(date +%F_%T)
+	if [ -n "${STEP_START_NS:-}" ]; then
+		if [ "$OSVERSION" == "Linux" ]; then
+			elapsed="$(($(date +%s%N)-STEP_START_NS))"
+		else
+			elapsed="$(($(date +%s)-STEP_START_NS))"
+		fi
+		duration=$(format_duration "$elapsed")
+	else
+		STEP_START_TS=${STEP_START_TS:-unknown}
+		duration="unknown"
+	fi
+
+	{
+		echo "step=$step"
+		echo "start=${STEP_START_TS:-unknown}"
+		echo "end=$end_ts"
+		echo "duration=$duration"
+	} > "$end_file"
+
+	echo "Step $step finished: start=${STEP_START_TS:-unknown} end=$end_ts duration=$duration"
 }
 
 create_hosts_file()
