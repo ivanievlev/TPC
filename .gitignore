@@ -15,6 +15,7 @@ segment_hosts.txt
 01_gen_data/*.idx
 01_gen_data/dsqgen
 07_multi_user/query_templates/
+07_multi_user/*/*.sql
 07_multi_user/dsqgen
 07_multi_user/*.idx
 # Generated SQL
