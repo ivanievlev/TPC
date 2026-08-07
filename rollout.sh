@@ -73,14 +73,19 @@ if [ -z "$RUN_SQL_WITH_DUCKDB" ]; then
 	RUN_SQL_WITH_DUCKDB="false"
 fi
 
-if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] && [ "$RUN_SQL_WITH_DUCKDB" != "true" ]; then
-	echo "parquet files can't be processed without DuckDB. Change format or activate DuckDB"
-	exit 1
-fi
-if [ "$USE_EXTERNAL_FORMAT" != "false" ] && [ "$USE_EXTERNAL_FORMAT" != "parquet" ]; then
-	echo "ERROR: USE_EXTERNAL_FORMAT must be \"false\" or \"parquet\" (got: $USE_EXTERNAL_FORMAT)"
-	exit 1
-fi
+case "$USE_EXTERNAL_FORMAT" in
+	false) ;;
+	parquet|csv|json)
+		if [ "$RUN_SQL_WITH_DUCKDB" != "true" ]; then
+			echo "${USE_EXTERNAL_FORMAT} files can't be processed without DuckDB. Change format or activate DuckDB"
+			exit 1
+		fi
+		;;
+	*)
+		echo "ERROR: USE_EXTERNAL_FORMAT must be \"false\", \"parquet\", \"csv\" or \"json\" (got: $USE_EXTERNAL_FORMAT)"
+		exit 1
+		;;
+esac
 
 if [ "$RUN_SQL_WITH_DUCKDB" = "true" ]; then
 	echo "Checking pg_duckdb extension (RUN_SQL_WITH_DUCKDB=true)..."

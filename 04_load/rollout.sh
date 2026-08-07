@@ -29,8 +29,8 @@ else
 	exit 1
 fi
 
-if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] && [ "$filter" != "postgresql" ]; then
-	echo "ERROR: USE_EXTERNAL_FORMAT=parquet is only supported for PostgreSQL/pg_duckdb"
+if { [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; } && [ "$filter" != "postgresql" ]; then
+	echo "ERROR: USE_EXTERNAL_FORMAT=${USE_EXTERNAL_FORMAT} is only supported for PostgreSQL/pg_duckdb"
 	exit 1
 fi
 
@@ -93,12 +93,12 @@ get_count_load_data()
 }
 
 
-if [ "$USE_EXTERNAL_FORMAT" = "parquet" ]; then
+if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; then
 	if [ "$TRUNCATE_BEFORE_LOAD" == "true" ]; then
-		echo "Removing existing parquet tree $(external_data_root)"
+		echo "Removing existing ${USE_EXTERNAL_FORMAT} tree $(external_data_root)"
 		rm -rf "$(external_data_root)"
 	fi
-	load_parquet_from_dat
+	load_external_from_dat
 	end_step $step
 	exit 0
 fi

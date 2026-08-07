@@ -1,5 +1,13 @@
 #!/bin/bash
-# Shared helpers for USE_EXTERNAL_FORMAT=parquet (pg_duckdb / local parquet).
+# Shared helpers for USE_EXTERNAL_FORMAT=parquet|csv|json (pg_duckdb / local files).
+
+external_format_enabled()
+{
+	case "${USE_EXTERNAL_FORMAT}" in
+		parquet|csv|json) return 0 ;;
+		*) return 1 ;;
+	esac
+}
 
 external_data_root()
 {
@@ -10,6 +18,21 @@ external_table_dir()
 {
 	local table_name=$1
 	echo "$(external_data_root)/${table_name}"
+}
+
+external_file_ext()
+{
+	echo "${USE_EXTERNAL_FORMAT}"
+}
+
+external_read_function()
+{
+	case "${USE_EXTERNAL_FORMAT}" in
+		parquet) echo "read_parquet" ;;
+		csv) echo "read_csv" ;;
+		json) echo "read_json" ;;
+		*) echo "read_parquet" ;;
+	esac
 }
 
 # Map PG type → cast target used in views / COPY SELECT aliases.
@@ -102,7 +125,7 @@ external_parse_columns()
 
 external_build_copy_options()
 {
-	local opts="FORMAT 'parquet', OVERWRITE_OR_IGNORE TRUE"
+	local opts="FORMAT '${USE_EXTERNAL_FORMAT}', OVERWRITE_OR_IGNORE TRUE"
 	if [ "${EXTERNAL_FILE_SIZE_BYTES}" != "-1" ] && [ -n "${EXTERNAL_FILE_SIZE_BYTES}" ]; then
 		opts+=", FILE_SIZE_BYTES '${EXTERNAL_FILE_SIZE_BYTES}'"
 	fi
@@ -121,8 +144,43 @@ external_dat_glob()
 	echo "${PGDATA}/arenadata_*/${table_name}_*.dat"
 }
 
+# Glob used by read_* in views.
+external_view_glob()
+{
+	local table_dir=$1
+	local ext
+	ext=$(external_file_ext)
+	if external_hive_enabled; then
+		echo "${table_dir}/**/*.${ext}"
+	else
+		echo "${table_dir}/*.${ext}"
+	fi
+}
+
+# FROM clause for CREATE VIEW (pg_duckdb read_*).
+external_build_view_from_clause()
+{
+	local table_dir=$1
+	local hive_flag=$2
+	local glob path_expr
+	glob=$(external_view_glob "$table_dir")
+	path_expr="'${glob}'::text"
+
+	case "${USE_EXTERNAL_FORMAT}" in
+		parquet)
+			echo "FROM read_parquet(${path_expr}, hive_partitioning => ${hive_flag}) r"
+			;;
+		csv)
+			echo "FROM read_csv(${path_expr}, header => true, delim => ',', hive_partitioning => ${hive_flag}) r"
+			;;
+		json)
+			# read_json in pg_duckdb has no hive_partitioning arg; recursive glob covers hive dirs.
+			echo "FROM read_json(${path_expr}, format => 'newline_delimited') r"
+			;;
+	esac
+}
+
 # Build SELECT list casting CSV columns to typed aliases.
-# Uses DuckDB column names from columns={...} so we select by name.
 external_build_typed_select()
 {
 	local ddl_file=$1
@@ -178,7 +236,14 @@ external_build_view_select()
 	printf "\n"
 }
 
-create_parquet_views()
+ensure_pg_duckdb_extension()
+{
+	# DROP SCHEMA tpcds CASCADE can drop pg_duckdb when views depend on it.
+	echo "Ensuring pg_duckdb extension is installed in $DBNAME"
+	psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "CREATE EXTENSION IF NOT EXISTS pg_duckdb;"
+}
+
+create_external_views()
 {
 	local root hive_flag ddl_file table_name view_sql table_dir
 	root=$(external_data_root)
@@ -188,8 +253,11 @@ create_parquet_views()
 		hive_flag="false"
 	fi
 
-	echo "Creating schema tpcds and parquet views under $root (hive_partitioning => $hive_flag)"
+	echo "Creating schema tpcds and ${USE_EXTERNAL_FORMAT} views under $root (hive_partitioning => $hive_flag)"
+	ensure_pg_duckdb_extension
 	psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "DROP SCHEMA IF EXISTS tpcds CASCADE; CREATE SCHEMA tpcds;"
+	# Cascade above may have removed the extension via dependent views — reinstall.
+	ensure_pg_duckdb_extension
 
 	for ddl_file in $(ls "$LOCAL_PWD"/03_ddl/*.postgresql.*.sql | sort); do
 		table_name=$(basename "$ddl_file" | awk -F '.' '{print $3}')
@@ -204,7 +272,8 @@ create_parquet_views()
 		{
 			echo "CREATE VIEW tpcds.${table_name} AS SELECT"
 			external_build_view_select "$ddl_file"
-			echo "FROM read_parquet('${table_dir}/*.parquet', hive_partitioning => ${hive_flag}) r;"
+			external_build_view_from_clause "$table_dir" "$hive_flag"
+			echo ";"
 		} > "$view_sql"
 		echo "Creating view tpcds.${table_name}"
 		psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -f "$view_sql"
@@ -216,18 +285,25 @@ create_parquet_views()
 	done
 }
 
-# Convert one table's .dat files to parquet via pg_duckdb (no heap table).
-convert_table_dat_to_parquet()
+# Backward-compatible alias
+create_parquet_views()
+{
+	create_external_views
+}
+
+# Convert one table's .dat files to external format via pg_duckdb (no heap table).
+convert_table_dat_to_external()
 {
 	local table_name=$1
 	local ddl_file=$2
-	local table_dir dat_glob cols_map opts sql_file date_sk date_glob target_path
+	local table_dir dat_glob cols_map opts sql_file date_sk date_glob target_path ext
 	local hive_mode="no"
 
 	table_dir=$(external_table_dir "$table_name")
 	dat_glob=$(external_dat_glob "$table_name")
 	cols_map=$(external_build_csv_columns_map "$ddl_file")
 	date_sk=$(external_hive_date_sk_column "$table_name")
+	ext=$(external_file_ext)
 
 	mkdir -p "$(external_data_root)"
 	rm -rf "$table_dir"
@@ -241,7 +317,7 @@ convert_table_dat_to_parquet()
 	target_path="${table_dir}"
 	if [ "$hive_mode" != "hive" ]; then
 		if [ "${EXTERNAL_FILE_SIZE_BYTES}" = "-1" ] || [ -z "${EXTERNAL_FILE_SIZE_BYTES}" ]; then
-			target_path="${table_dir}/data.parquet"
+			target_path="${table_dir}/data.${ext}"
 		fi
 	fi
 
@@ -289,17 +365,22 @@ convert_table_dat_to_parquet()
 	rm -f "$sql_file"
 }
 
-load_parquet_from_dat()
+convert_table_dat_to_parquet()
+{
+	convert_table_dat_to_external "$@"
+}
+
+load_external_from_dat()
 {
 	local ddl_dir="$LOCAL_PWD/03_ddl"
 	local ddl_file table_name
 	local fail=0
 
-	echo "Converting .dat files to parquet under $(external_data_root)"
+	echo "Converting .dat files to ${USE_EXTERNAL_FORMAT} under $(external_data_root)"
 	mkdir -p "$(external_data_root)"
+	ensure_pg_duckdb_extension
 
 	# Convert tables sequentially: large SF may OOM if all run in parallel via DuckDB.
-	# Order date_dim early (harmless for non-hive; useful for clarity).
 	for ddl_file in $(ls "$ddl_dir"/*.postgresql.*.sql | sort); do
 		table_name=$(basename "$ddl_file" | awk -F '.' '{print $3}')
 		case "$table_name" in
@@ -309,7 +390,6 @@ load_parquet_from_dat()
 			continue
 		fi
 
-		# Skip if no source .dat files
 		if ! compgen -G "$(external_dat_glob "$table_name")" > /dev/null; then
 			echo "WARNING: no .dat files for $table_name, skipping"
 			continue
@@ -317,20 +397,25 @@ load_parquet_from_dat()
 
 		schema_name="tpcds"
 		start_log
-		echo "Parquet convert: $table_name"
-		if convert_table_dat_to_parquet "$table_name" "$ddl_file"; then
+		echo "${USE_EXTERNAL_FORMAT} convert: $table_name"
+		if convert_table_dat_to_external "$table_name" "$ddl_file"; then
 			log 0
 		else
 			fail=1
 			log 0
-			echo "ERROR: parquet conversion failed for $table_name"
+			echo "ERROR: ${USE_EXTERNAL_FORMAT} conversion failed for $table_name"
 			break
 		fi
 	done
 
 	if [ "$fail" -ne 0 ]; then
-		echo "ERROR: one or more parquet conversions failed"
+		echo "ERROR: one or more ${USE_EXTERNAL_FORMAT} conversions failed"
 		exit 1
 	fi
-	echo "All parquet conversions finished successfully."
+	echo "All ${USE_EXTERNAL_FORMAT} conversions finished successfully."
+}
+
+load_parquet_from_dat()
+{
+	load_external_from_dat
 }

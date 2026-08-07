@@ -79,8 +79,8 @@ else
 	exit 1
 fi
 
-if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] && [ "$filter" != "postgresql" ]; then
-	echo "ERROR: USE_EXTERNAL_FORMAT=parquet is only supported for PostgreSQL/pg_duckdb"
+if { [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; } && [ "$filter" != "postgresql" ]; then
+	echo "ERROR: USE_EXTERNAL_FORMAT=${USE_EXTERNAL_FORMAT} is only supported for PostgreSQL/pg_duckdb"
 	exit 1
 fi
 
@@ -120,9 +120,9 @@ for i in $(ls $PWD/*.$filter.*.sql); do
 done
 }
 
-if [ "$USE_EXTERNAL_FORMAT" = "parquet" ]; then
-	echo "Creating parquet views for schema TPCDS (no heap tables)"
-	create_parquet_views
+if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; then
+	echo "Creating ${USE_EXTERNAL_FORMAT} views for schema TPCDS (no heap tables)"
+	create_external_views
 else
 	echo "Creating DDL for schema TPCDS"
 	create_tables "tpcds"
@@ -148,7 +148,7 @@ else
 fi
 
 #external tables are the same for all gpdb
-if [ "$filter" == "gpdb" ] && [ "$USE_EXTERNAL_FORMAT" != "parquet" ]; then
+if [ "$filter" == "gpdb" ] && [ "$USE_EXTERNAL_FORMAT" = "false" ]; then
 
 	get_gpfdist_port
 
