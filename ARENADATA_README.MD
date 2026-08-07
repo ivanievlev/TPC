@@ -5,6 +5,7 @@
 - Changed compression options from quicklz to zstd
 - Added new parameters
 - Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
+- Added PostgreSQL/pg_duckdb local parquet mode: `USE_EXTERNAL_FORMAT`, `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`
 
 ## Installation
 
@@ -107,6 +108,38 @@ tail -f tpcds.log
 - MAKE_PREREQUISITES="false" and NETWORK_INTERFACE_JUMBOFRAME="eth0"
 
 	``Default behaviour with MAKE_PREREQUISITES="false" does nothing. If MAKE_PREREQUISITES="true" then we will set mtu 9000 on all network interfaces with 		NETWORK_INTERFACE_JUMBOFRAME = "<name>" in all hosts (Jumbo Frame) and 	force start the cluster if it is not started``
+
+- USE_EXTERNAL_FORMAT="false"
+
+	``PostgreSQL/pg_duckdb only. Default "false" keeps the classic path: heap tables + COPY from .dat files.
+	If "parquet", step 03 creates views over local parquet (no heap tables / PK / indexes), and step 04 converts .dat files into parquet under
+	/arenadata/tpcds_<GEN_DATA_SCALE>_parquet/<table>/ using pg_duckdb COPY ... WITH (FORMAT 'parquet', ...).
+	No intermediate Postgres heap table is created for the load.``
+
+- EXTERNAL_HIVE_PARTITIONING="false"
+
+	``Used only when USE_EXTERNAL_FORMAT="parquet". Default "false": flat parquet dirs and read_parquet(..., hive_partitioning => false).
+	If set to "year, month", fact tables with a date_sk (inventory, store_sales/returns, catalog_sales/returns, web_sales/returns) are written with
+	PARTITION_BY (year, month) hive directories (year/month taken from date_dim), and views use hive_partitioning => true.``
+
+- EXTERNAL_FILE_SIZE_BYTES="-1"
+
+	``Used only when USE_EXTERNAL_FORMAT="parquet". Default "-1": do not pass FILE_SIZE_BYTES (no forced chunking; a single data.parquet is written when hive is off).
+	If set (e.g. "1GB"), FILE_SIZE_BYTES is added to the parquet COPY options and files are split accordingly.``
+
+- EXTERNAL_COMPRESSION="false"
+
+	``Used only when USE_EXTERNAL_FORMAT="parquet". Default "false": do not pass COMPRESSION.
+	If set (e.g. "snappy" or "zstd"), COMPRESSION is added to the parquet COPY options.``
+
+- RUN_SQL_WITH_DUCKDB="false"
+
+	``PostgreSQL/pg_duckdb only. Default "false": steps 05 and 07 run as usual on Postgres.
+	If "true", those steps set duckdb.force_execution TO true for each query session. With USE_EXTERNAL_FORMAT="false" DuckDB reads heap tables;
+	with USE_EXTERNAL_FORMAT="parquet" DuckDB reads the parquet views.
+	Validation: USE_EXTERNAL_FORMAT="parquet" requires RUN_SQL_WITH_DUCKDB="true", otherwise the run fails with:
+	"parquet files can't be processed without DuckDB. Change format or activate DuckDB".
+	Presence of the pg_duckdb extension/.so is not checked — it is assumed to be installed.``
 
 ## Parameters that are set during 02_init phase: Resource Groups limits (only for admin_group) and network sysctl parameters 
 

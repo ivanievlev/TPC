@@ -18,6 +18,11 @@ REFERENCE_TABLE_TYPE="${20}"
 DROP_CACHE_BEFORE_EACH_SINGLE_QUERY="${21}"
 DBNAME=${27}
 STATEMENT_TIMEOUT=${28}
+USE_EXTERNAL_FORMAT=${29}
+EXTERNAL_HIVE_PARTITIONING=${30}
+EXTERNAL_FILE_SIZE_BYTES=${31}
+EXTERNAL_COMPRESSION=${32}
+RUN_SQL_WITH_DUCKDB=${33}
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
 	echo "You must provide the scale as a parameter in terms of Gigabytes, true/false to run queries with EXPLAIN ANALYZE option, true/false to use random distrbution, multi-user count, and the number of sql iterations."
@@ -27,17 +32,27 @@ fi
 if [ -z "$STATEMENT_TIMEOUT" ]; then
 	STATEMENT_TIMEOUT="1h"
 fi
+if [ -z "$RUN_SQL_WITH_DUCKDB" ]; then
+	RUN_SQL_WITH_DUCKDB="false"
+fi
 
 step=sql
 init_log $step
 
 echo "SQL_ON_ERROR_STOP = $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT = $STATEMENT_TIMEOUT"
+echo "RUN_SQL_WITH_DUCKDB = $RUN_SQL_WITH_DUCKDB"
+echo "USE_EXTERNAL_FORMAT = $USE_EXTERNAL_FORMAT"
 if [ "$SQL_ON_ERROR_STOP" == "true" ]; then
 	ON_ERROR_STOP=1
 else
 	ON_ERROR_STOP=0
-fi	
+fi
+
+PSQL_SESSION_SETS="SET statement_timeout='$STATEMENT_TIMEOUT';"
+if [ "$RUN_SQL_WITH_DUCKDB" == "true" ]; then
+	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.force_execution TO true;"
+fi
 
 get_version
 if [[ "$VERSION" == *"gpdb"* ]]; then
@@ -115,13 +130,13 @@ for i in $(ls $PWD/*.tpcds.*.sql); do
 		table_name=`echo $i | awk -F '.' '{print $3}'`
 		start_log
 		if [ "$EXPLAIN_ANALYZE" == "false" ]; then
-			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"SET statement_timeout=$STATEMENT_TIMEOUT;\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
-			tuples=$(psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "SET statement_timeout='$STATEMENT_TIMEOUT';" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l; exit ${PIPESTATUS[0]})
+			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
+			tuples=$(psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l; exit ${PIPESTATUS[0]})
 		else
 			myfilename=$(basename $i)
 			mylogfile=$PWD/../log/$myfilename.single.explain_analyze.log
-			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"SET statement_timeout=$STATEMENT_TIMEOUT;\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
-			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "SET statement_timeout='$STATEMENT_TIMEOUT';" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i > $mylogfile
+			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
+			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i > $mylogfile
 			tuples="0"
 		fi
 		log $tuples

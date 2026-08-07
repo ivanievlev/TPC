@@ -256,7 +256,32 @@ check_variables()
                 echo "SET_ORCA_OPTIMIZER=\"on\"" >> $MYVAR
                 new_variable=$(($new_variable + 1))
         fi
-        
+
+	local count=$(grep "USE_EXTERNAL_FORMAT" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "USE_EXTERNAL_FORMAT=\"false\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "EXTERNAL_HIVE_PARTITIONING" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "EXTERNAL_HIVE_PARTITIONING=\"false\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "EXTERNAL_FILE_SIZE_BYTES" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "EXTERNAL_FILE_SIZE_BYTES=\"-1\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "EXTERNAL_COMPRESSION" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "EXTERNAL_COMPRESSION=\"false\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "RUN_SQL_WITH_DUCKDB" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "RUN_SQL_WITH_DUCKDB=\"false\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
 
 	if [ "$new_variable" -gt "0" ]; then
 		echo "There are new variables in the tpcds_variables.sh file.  Please review to ensure the values are correct and then re-run this script."
@@ -446,6 +471,11 @@ echo_variables()
 	echo "MAKE_PREREQUISITES: $MAKE_PREREQUISITES"
 	echo "NETWORK_INTERFACE_JUMBOFRAME: $NETWORK_INTERFACE_JUMBOFRAME"
 	echo "SET_ORCA_OPTIMIZER: $SET_ORCA_OPTIMIZER"
+	echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
+	echo "EXTERNAL_HIVE_PARTITIONING: $EXTERNAL_HIVE_PARTITIONING"
+	echo "EXTERNAL_FILE_SIZE_BYTES: $EXTERNAL_FILE_SIZE_BYTES"
+	echo "EXTERNAL_COMPRESSION: $EXTERNAL_COMPRESSION"
+	echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
 	echo "############################################################################"
 	echo ""
 }
@@ -495,6 +525,6 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT"
+su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB"
 
 

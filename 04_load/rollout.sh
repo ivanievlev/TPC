@@ -6,10 +6,16 @@ source $PWD/../functions.sh
 source_bashrc
 
 DBNAME=${27}
+USE_EXTERNAL_FORMAT=${29}
+EXTERNAL_HIVE_PARTITIONING=${30}
+EXTERNAL_FILE_SIZE_BYTES=${31}
+EXTERNAL_COMPRESSION=${32}
+RUN_SQL_WITH_DUCKDB=${33}
 
 TRUNCATE_BEFORE_LOAD=$9
 step=load
 init_log $step
+source $PWD/../external_format.sh
 
 ADMIN_HOME=$(eval echo ~$ADMIN_USER)
 
@@ -20,6 +26,11 @@ elif [ "$VERSION" == "postgresql" ]; then
 	filter="postgresql"
 else
 	echo "ERROR: Unsupported VERSION $VERSION!"
+	exit 1
+fi
+
+if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] && [ "$filter" != "postgresql" ]; then
+	echo "ERROR: USE_EXTERNAL_FORMAT=parquet is only supported for PostgreSQL/pg_duckdb"
 	exit 1
 fi
 
@@ -81,6 +92,16 @@ get_count_load_data()
 	done
 }
 
+
+if [ "$USE_EXTERNAL_FORMAT" = "parquet" ]; then
+	if [ "$TRUNCATE_BEFORE_LOAD" == "true" ]; then
+		echo "Removing existing parquet tree $(external_data_root)"
+		rm -rf "$(external_data_root)"
+	fi
+	load_parquet_from_dat
+	end_step $step
+	exit 0
+fi
 
 if [ "$TRUNCATE_BEFORE_LOAD" == "true" ]; then
 	echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -f 000.truncate.sql"

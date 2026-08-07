@@ -15,9 +15,16 @@ EXTRA_TPCDS_QUERIES=$8
 HEAP_ONLY=${21}
 REFERENCE_TABLE_TYPE=${26}
 DBNAME=${27}
+USE_EXTERNAL_FORMAT=${29}
+EXTERNAL_HIVE_PARTITIONING=${30}
+EXTERNAL_FILE_SIZE_BYTES=${31}
+EXTERNAL_COMPRESSION=${32}
+RUN_SQL_WITH_DUCKDB=${33}
 
 echo "HEAP_ONLY: $HEAP_ONLY"
 echo "REFERENCE_TABLE_TYPE: $REFERENCE_TABLE_TYPE"
+echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
+echo "EXTERNAL_HIVE_PARTITIONING: $EXTERNAL_HIVE_PARTITIONING"
 
 
 #multiplying qiantity of partitions with EVERY=1 parameter in DDL
@@ -61,6 +68,7 @@ fi
 step=ddl
 init_log $step
 get_version
+source $PWD/../external_format.sh
 
 if [[ "$VERSION" == *"gpdb"* ]]; then
 	filter="gpdb"
@@ -68,6 +76,11 @@ elif [ "$VERSION" == "postgresql" ]; then
 	filter="postgresql"
 else
 	echo "ERROR: Unsupported VERSION $VERSION!"
+	exit 1
+fi
+
+if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] && [ "$filter" != "postgresql" ]; then
+	echo "ERROR: USE_EXTERNAL_FORMAT=parquet is only supported for PostgreSQL/pg_duckdb"
 	exit 1
 fi
 
@@ -107,30 +120,35 @@ for i in $(ls $PWD/*.$filter.*.sql); do
 done
 }
 
-echo "Creating DDL for schema TPCDS"
-create_tables "tpcds"
+if [ "$USE_EXTERNAL_FORMAT" = "parquet" ]; then
+	echo "Creating parquet views for schema TPCDS (no heap tables)"
+	create_parquet_views
+else
+	echo "Creating DDL for schema TPCDS"
+	create_tables "tpcds"
 
-echo "Creating DDL for extra schemas TPCDSx"
-for i in $(seq 1 $EXTRA_TPCDS_QUERIES); do
-        schema="tpcds$i"
-	echo "Running stream$i for Creating DDL for schema $schema"
-	echo "Now executing DDLs. This make take a while..."
-        create_tables "$schema" &
-done
+	echo "Creating DDL for extra schemas TPCDSx"
+	for i in $(seq 1 $EXTRA_TPCDS_QUERIES); do
+	        schema="tpcds$i"
+		echo "Running stream$i for Creating DDL for schema $schema"
+		echo "Now executing DDLs. This make take a while..."
+	        create_tables "$schema" &
+	done
 
-sleep 10
+	sleep 10
 
-get_psql_count
-while [ "$psql_count" -gt "0" ]; do
-	echo -ne "."
-        sleep 10
-        get_psql_count
-done
-echo "done."
-echo ""
+	get_psql_count
+	while [ "$psql_count" -gt "0" ]; do
+		echo -ne "."
+	        sleep 10
+	        get_psql_count
+	done
+	echo "done."
+	echo ""
+fi
 
 #external tables are the same for all gpdb
-if [ "$filter" == "gpdb" ]; then
+if [ "$filter" == "gpdb" ] && [ "$USE_EXTERNAL_FORMAT" != "parquet" ]; then
 
 	get_gpfdist_port
 
