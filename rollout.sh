@@ -82,6 +82,25 @@ if [ "$USE_EXTERNAL_FORMAT" != "false" ] && [ "$USE_EXTERNAL_FORMAT" != "parquet
 	exit 1
 fi
 
+if [ "$RUN_SQL_WITH_DUCKDB" = "true" ]; then
+	echo "Checking pg_duckdb extension (RUN_SQL_WITH_DUCKDB=true)..."
+	if ! command -v psql >/dev/null 2>&1; then
+		echo "ERROR: psql not found in PATH; cannot verify pg_duckdb extension."
+		exit 1
+	fi
+	duckdb_available=$(psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -t -A -c "SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_duckdb';" 2>/dev/null || echo "0")
+	if [ "$duckdb_available" != "1" ]; then
+		echo "ERROR: RUN_SQL_WITH_DUCKDB=true but extension pg_duckdb is not available in database $DBNAME."
+		echo "Install pg_duckdb on the PostgreSQL server and ensure it appears in pg_available_extensions."
+		exit 1
+	fi
+	if ! psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "CREATE EXTENSION IF NOT EXISTS pg_duckdb;"; then
+		echo "ERROR: failed to CREATE EXTENSION pg_duckdb in database $DBNAME."
+		exit 1
+	fi
+	echo "pg_duckdb extension is available and installed."
+fi
+
 QUIET=$5
 
 create_directories()

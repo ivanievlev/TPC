@@ -139,7 +139,8 @@ tail -f tpcds.log
 	with USE_EXTERNAL_FORMAT="parquet" DuckDB reads the parquet views.
 	Validation: USE_EXTERNAL_FORMAT="parquet" requires RUN_SQL_WITH_DUCKDB="true", otherwise the run fails with:
 	"parquet files can't be processed without DuckDB. Change format or activate DuckDB".
-	Presence of the pg_duckdb extension/.so is not checked — it is assumed to be installed.``
+	At the start of the run, if RUN_SQL_WITH_DUCKDB="true", the script checks that extension pg_duckdb is present in
+	pg_available_extensions and runs CREATE EXTENSION IF NOT EXISTS pg_duckdb; otherwise it exits with an error.``
 
 ## Parameters that are set during 02_init phase: Resource Groups limits (only for admin_group) and network sysctl parameters 
 
