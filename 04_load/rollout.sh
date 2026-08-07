@@ -5,6 +5,7 @@ PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../functions.sh
 source_bashrc
 
+GEN_DATA_SCALE=$1
 DBNAME=${27}
 USE_EXTERNAL_FORMAT=${29}
 EXTERNAL_HIVE_PARTITIONING=${30}
@@ -16,6 +17,13 @@ TRUNCATE_BEFORE_LOAD=$9
 step=load
 init_log $step
 source $PWD/../external_format.sh
+
+echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
+echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
+if { [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; } && [ -z "$GEN_DATA_SCALE" ]; then
+	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path /arenadata/tpcds_<scale>_${USE_EXTERNAL_FORMAT}/"
+	exit 1
+fi
 
 ADMIN_HOME=$(eval echo ~$ADMIN_USER)
 
