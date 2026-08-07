@@ -140,8 +140,10 @@ external_build_copy_options()
 
 external_dat_glob()
 {
+	# Exact TPC-DS chunk name: <table>_<child>_<parallel>.dat
+	# Must NOT use <table>_*.dat — that also matches store_returns / customer_address / etc.
 	local table_name=$1
-	echo "${PGDATA}/arenadata_*/${table_name}_*.dat"
+	echo "${PGDATA}/arenadata_*/${table_name}_[0-9]*_[0-9]*.dat"
 }
 
 # Glob used by read_* in views.
@@ -219,6 +221,7 @@ external_build_csv_columns_map()
 }
 
 # pg_duckdb cannot parse DuckDB columns={...} in plain SQL; wrap in duckdb.query($duck$...$duck$).
+# encoding latin-1: same as classic COPY for customer (and safe for other TPC-DS .dat files).
 external_read_csv_duckdb_sql()
 {
 	local dat_glob=$1
@@ -226,7 +229,7 @@ external_read_csv_duckdb_sql()
 	local ddl_file=$3
 	echo "SELECT"
 	external_build_typed_select "$ddl_file"
-	echo "FROM read_csv('${dat_glob}', delim='|', header=false, auto_detect=false, nullstr='', columns=${cols_map})"
+	echo "FROM read_csv('${dat_glob}', delim='|', header=false, auto_detect=false, nullstr='', encoding='latin-1', columns=${cols_map})"
 }
 
 external_date_dim_csv_duckdb_sql()
@@ -237,7 +240,7 @@ SELECT
   d_date_sk::INTEGER AS d_date_sk,
   d_year::INTEGER AS d_year,
   d_moy::INTEGER AS d_moy
-FROM read_csv('${date_glob}', delim='|', header=false, auto_detect=false, nullstr='',
+FROM read_csv('${date_glob}', delim='|', header=false, auto_detect=false, nullstr='', encoding='latin-1',
   columns={'d_date_sk': 'INTEGER', 'd_date_id': 'VARCHAR', 'd_date': 'DATE', 'd_month_seq': 'INTEGER',
            'd_week_seq': 'INTEGER', 'd_quarter_seq': 'INTEGER', 'd_year': 'INTEGER', 'd_dow': 'INTEGER',
            'd_moy': 'INTEGER', 'd_dom': 'INTEGER', 'd_qoy': 'INTEGER', 'd_fy_year': 'INTEGER',
@@ -383,8 +386,21 @@ convert_table_dat_to_external()
 		fi
 	} > "$sql_file"
 
-	psql -d "$DBNAME" -v ON_ERROR_STOP=1 -f "$sql_file"
+	if ! psql -d "$DBNAME" -v ON_ERROR_STOP=1 -f "$sql_file"; then
+		rm -f "$sql_file"
+		echo "ERROR: psql convert failed for $table_name"
+		return 1
+	fi
 	rm -f "$sql_file"
+
+	# Reject empty / non-parquet leftovers from failed writes.
+	local out_bytes
+	out_bytes=$(find "$table_dir" -type f \( -name "*.${ext}" -o -name "*.parquet" -o -name "*.csv" -o -name "*.json" \) -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}')
+	if [ "${out_bytes:-0}" -le 0 ]; then
+		echo "ERROR: no output data written for $table_name under $table_dir"
+		return 1
+	fi
+	return 0
 }
 
 convert_table_dat_to_parquet()
@@ -422,6 +438,7 @@ load_external_from_dat()
 		id=$(basename "$ddl_file" | awk -F '.' '{print $1}')
 		start_log
 		echo "${USE_EXTERNAL_FORMAT} convert: $table_name"
+		echo "  source glob: $(external_dat_glob "$table_name")"
 		if convert_table_dat_to_external "$table_name" "$ddl_file"; then
 			log 0
 		else
