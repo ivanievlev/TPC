@@ -218,6 +218,38 @@ external_build_csv_columns_map()
 	printf "}"
 }
 
+# pg_duckdb cannot parse DuckDB columns={...} in plain SQL; wrap in duckdb.query($duck$...$duck$).
+external_read_csv_duckdb_sql()
+{
+	local dat_glob=$1
+	local cols_map=$2
+	local ddl_file=$3
+	echo "SELECT"
+	external_build_typed_select "$ddl_file"
+	echo "FROM read_csv('${dat_glob}', delim='|', header=false, auto_detect=false, nullstr='', columns=${cols_map})"
+}
+
+external_date_dim_csv_duckdb_sql()
+{
+	local date_glob=$1
+	cat <<EOF
+SELECT
+  d_date_sk::INTEGER AS d_date_sk,
+  d_year::INTEGER AS d_year,
+  d_moy::INTEGER AS d_moy
+FROM read_csv('${date_glob}', delim='|', header=false, auto_detect=false, nullstr='',
+  columns={'d_date_sk': 'INTEGER', 'd_date_id': 'VARCHAR', 'd_date': 'DATE', 'd_month_seq': 'INTEGER',
+           'd_week_seq': 'INTEGER', 'd_quarter_seq': 'INTEGER', 'd_year': 'INTEGER', 'd_dow': 'INTEGER',
+           'd_moy': 'INTEGER', 'd_dom': 'INTEGER', 'd_qoy': 'INTEGER', 'd_fy_year': 'INTEGER',
+           'd_fy_quarter_seq': 'INTEGER', 'd_fy_week_seq': 'INTEGER', 'd_day_name': 'VARCHAR',
+           'd_quarter_name': 'VARCHAR', 'd_holiday': 'VARCHAR', 'd_weekend': 'VARCHAR',
+           'd_following_holiday': 'VARCHAR', 'd_first_dom': 'INTEGER', 'd_last_dom': 'INTEGER',
+           'd_same_day_ly': 'INTEGER', 'd_same_day_lq': 'INTEGER', 'd_current_day': 'VARCHAR',
+           'd_current_week': 'VARCHAR', 'd_current_month': 'VARCHAR', 'd_current_quarter': 'VARCHAR',
+           'd_current_year': 'VARCHAR'})
+EOF
+}
+
 external_build_view_select()
 {
 	local ddl_file=$1
@@ -330,35 +362,22 @@ convert_table_dat_to_external()
 		if [ "$hive_mode" = "hive" ]; then
 			date_glob=$(external_dat_glob "date_dim")
 			echo "COPY ("
-			echo "  SELECT t.*, d.d_year AS year, d.d_moy AS month"
-			echo "  FROM ("
-			echo "    SELECT"
-			external_build_typed_select "$ddl_file"
-			echo "    FROM read_csv('${dat_glob}', delim='|', header=false, auto_detect=false, nullstr='', columns=${cols_map}) "
-			echo "  ) t"
-			echo "  LEFT JOIN ("
-			echo "    SELECT"
-			echo "      d_date_sk::integer AS d_date_sk,"
-			echo "      d_year::integer AS d_year,"
-			echo "      d_moy::integer AS d_moy"
-			echo "    FROM read_csv('${date_glob}', delim='|', header=false, auto_detect=false, nullstr='',"
-			echo "      columns={'d_date_sk': 'INTEGER', 'd_date_id': 'VARCHAR', 'd_date': 'DATE', 'd_month_seq': 'INTEGER',"
-			echo "               'd_week_seq': 'INTEGER', 'd_quarter_seq': 'INTEGER', 'd_year': 'INTEGER', 'd_dow': 'INTEGER',"
-			echo "               'd_moy': 'INTEGER', 'd_dom': 'INTEGER', 'd_qoy': 'INTEGER', 'd_fy_year': 'INTEGER',"
-			echo "               'd_fy_quarter_seq': 'INTEGER', 'd_fy_week_seq': 'INTEGER', 'd_day_name': 'VARCHAR',"
-			echo "               'd_quarter_name': 'VARCHAR', 'd_holiday': 'VARCHAR', 'd_weekend': 'VARCHAR',"
-			echo "               'd_following_holiday': 'VARCHAR', 'd_first_dom': 'INTEGER', 'd_last_dom': 'INTEGER',"
-			echo "               'd_same_day_ly': 'INTEGER', 'd_same_day_lq': 'INTEGER', 'd_current_day': 'VARCHAR',"
-			echo "               'd_current_week': 'VARCHAR', 'd_current_month': 'VARCHAR', 'd_current_quarter': 'VARCHAR',"
-			echo "               'd_current_year': 'VARCHAR'})"
-			echo "  ) d ON t.${date_sk} = d.d_date_sk"
+			echo "  SELECT * FROM duckdb.query(\$duck\$"
+			echo "    SELECT t.*, d.d_year AS year, d.d_moy AS month"
+			echo "    FROM ("
+			external_read_csv_duckdb_sql "$dat_glob" "$cols_map" "$ddl_file" | sed 's/^/      /'
+			echo "    ) t"
+			echo "    LEFT JOIN ("
+			external_date_dim_csv_duckdb_sql "$date_glob" | sed 's/^/      /'
+			echo "    ) d ON t.${date_sk} = d.d_date_sk"
+			echo "  \$duck\$)"
 			echo ") TO '${table_dir}'"
 			echo "WITH (${opts});"
 		else
 			echo "COPY ("
-			echo "  SELECT"
-			external_build_typed_select "$ddl_file"
-			echo "  FROM read_csv('${dat_glob}', delim='|', header=false, auto_detect=false, nullstr='', columns=${cols_map})"
+			echo "  SELECT * FROM duckdb.query(\$duck\$"
+			external_read_csv_duckdb_sql "$dat_glob" "$cols_map" "$ddl_file" | sed 's/^/    /'
+			echo "  \$duck\$)"
 			echo ") TO '${target_path}'"
 			echo "WITH (${opts});"
 		fi
