@@ -279,6 +279,9 @@ create_external_views()
 		psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -f "$view_sql"
 		rm -f "$view_sql"
 
+		# log() expects $i (sql path) to derive numeric id — same as 03_ddl/create_tables
+		i=$ddl_file
+		id=$(basename "$ddl_file" | awk -F '.' '{print $1}')
 		schema_name="tpcds"
 		start_log
 		log 0
@@ -396,6 +399,8 @@ load_external_from_dat()
 		fi
 
 		schema_name="tpcds"
+		i=$ddl_file
+		id=$(basename "$ddl_file" | awk -F '.' '{print $1}')
 		start_log
 		echo "${USE_EXTERNAL_FORMAT} convert: $table_name"
 		if convert_table_dat_to_external "$table_name" "$ddl_file"; then

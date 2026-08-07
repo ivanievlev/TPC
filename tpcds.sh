@@ -396,23 +396,36 @@ repo_init()
 		fi
 	else
 		chown -R $ADMIN_USER $INSTALL_DIR/$REPO
-		if [ "$internet_down" -eq "0" ]; then
-			git config --global user.email "$ADMIN_USER@$HOSTNAME"
-			git config --global user.name "$ADMIN_USER"
-			# Переключение на REPO_BRANCH: сначала пробуем origin/<branch>,
-			# если remote-ветки нет — используем локальную ветку с тем же именем.
-			su -c "cd $INSTALL_DIR/$REPO; \
-				GIT_SSL_NO_VERIFY=true git fetch origin $REPO_BRANCH || true; \
-				if git rev-parse --verify origin/$REPO_BRANCH >/dev/null 2>&1; then \
-					git checkout -B $REPO_BRANCH origin/$REPO_BRANCH; \
-					git reset --hard origin/$REPO_BRANCH; \
-				elif git rev-parse --verify $REPO_BRANCH >/dev/null 2>&1; then \
-					git checkout $REPO_BRANCH; \
-				else \
-					echo \"ERROR: branch $REPO_BRANCH not found locally or on origin\"; \
-					exit 1; \
-				fi" $ADMIN_USER
+
+		# Не сбрасываем локальные коммиты (никакого reset --hard / checkout -B origin/...).
+		# 1) при грязном дереве — стоп; 2) иначе checkout локальной REPO_BRANCH;
+		# 3) если локальной ветки нет — создать от origin/REPO_BRANCH.
+		local dirty
+		dirty=$(su -c "cd \"$INSTALL_DIR/$REPO\" && git status --porcelain" $ADMIN_USER 2>/dev/null | wc -l)
+		if [ "$dirty" -gt "0" ]; then
+			echo "ERROR: repository $INSTALL_DIR/$REPO has uncommitted changes."
+			echo "Please commit (or stash) them before running tpcds.sh, then re-run."
+			echo ""
+			su -c "cd \"$INSTALL_DIR/$REPO\" && git status --short" $ADMIN_USER || true
+			exit 1
 		fi
+
+		if [ "$internet_down" -eq "0" ]; then
+			su -c "cd \"$INSTALL_DIR/$REPO\"; GIT_SSL_NO_VERIFY=true git fetch origin $REPO_BRANCH || true" $ADMIN_USER || true
+		fi
+
+		su -c "cd \"$INSTALL_DIR/$REPO\"; \
+			if git rev-parse --verify $REPO_BRANCH >/dev/null 2>&1; then \
+				echo \"Checking out local branch $REPO_BRANCH (keeping local commits)\"; \
+				git checkout $REPO_BRANCH; \
+			elif git rev-parse --verify origin/$REPO_BRANCH >/dev/null 2>&1; then \
+				echo \"Local branch $REPO_BRANCH missing; creating from origin/$REPO_BRANCH\"; \
+				git checkout -b $REPO_BRANCH origin/$REPO_BRANCH; \
+			else \
+				echo \"ERROR: branch $REPO_BRANCH not found locally or on origin\"; \
+				exit 1; \
+			fi; \
+			echo \"Now on branch: \$(git rev-parse --abbrev-ref HEAD) @ \$(git rev-parse --short HEAD)\"" $ADMIN_USER
 	fi
 }
 

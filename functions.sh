@@ -157,10 +157,17 @@ log()
 	fi
 
 	#this is done for steps that don't have id values
-	if [ "$id" == "" ]; then
+	# Prefer deriving id from current SQL path $i; only fall back to 1 when $i is unset.
+	# (Do not reuse a stale $id from a previous log() call.)
+	if [ "${i:-}" = "" ]; then
 		id="1"
 	else
-		id=$(basename $i | awk -F '.' '{print $1}')
+		id=$(basename "$i" | awk -F '.' '{print $1}')
+	fi
+	# strip leading zeros so COPY into int works (e.g. 001 -> 1)
+	id=$(echo "$id" | sed 's/^0*//')
+	if [ "$id" = "" ]; then
+		id="1"
 	fi
 
 	tuples=$1
