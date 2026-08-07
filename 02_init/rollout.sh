@@ -260,6 +260,8 @@ fi
 set_search_path
 create_run_sql_from_role
 export PGUSER=$RUN_SQL_FROM_ROLE
+i=""
+id=""
 log
 
 end_step $step

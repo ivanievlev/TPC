@@ -126,6 +126,9 @@ echo "Generate queries based on scale"
 cd $PWD
 $PWD/generate_queries.sh $GEN_DATA_SCALE
 
+# Clear host-loop leftover in $i so log() writes numeric id (not hostname).
+i=""
+id=""
 log
 
 end_step $step

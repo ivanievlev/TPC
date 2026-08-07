@@ -156,17 +156,16 @@ log()
 		M=0
 	fi
 
-	#this is done for steps that don't have id values
-	# Prefer deriving id from current SQL path $i; only fall back to 1 when $i is unset.
-	# (Do not reuse a stale $id from a previous log() call.)
+	# Derive id from SQL path $i (e.g. 001.postgresql.inventory.sql -> 1).
+	# Do not reuse a stale $id. If $i is unset or not a numbered SQL file
+	# (e.g. leftover hostname from a host loop in gen_data), fall back to 1.
 	if [ "${i:-}" = "" ]; then
 		id="1"
 	else
 		id=$(basename "$i" | awk -F '.' '{print $1}')
 	fi
-	# strip leading zeros so COPY into int works (e.g. 001 -> 1)
 	id=$(echo "$id" | sed 's/^0*//')
-	if [ "$id" = "" ]; then
+	if ! [[ "$id" =~ ^[0-9]+$ ]]; then
 		id="1"
 	fi
 
