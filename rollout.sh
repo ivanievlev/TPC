@@ -204,10 +204,33 @@ if [ "$RUN_SCORE" == "true" ]; then
 fi
 
 
-# false steps are skipped during $i/rollout.sh when $PWD/log/end*.log files are checked in init_log
-# If you have trouble with skipping steps make sure that corresponding $PWD/log/end*.log exists! 
+# RUN_*=false → do not invoke the step at all.
+# RUN_*=true → delete that step's end_*.log above, then run (init_log inside the step
+# still skips only if an end_*.log somehow remains).
+
+step_run_flag()
+{
+	case "$(basename "$1")" in
+		00_compile_tpcds) echo "$RUN_COMPILE_TPCDS" ;;
+		01_gen_data) echo "$RUN_GEN_DATA" ;;
+		02_init) echo "$RUN_INIT" ;;
+		03_ddl) echo "$RUN_DDL" ;;
+		04_load) echo "$RUN_LOAD" ;;
+		05_sql) echo "$RUN_SQL" ;;
+		06_single_user_reports) echo "$RUN_SINGLE_USER_REPORT" ;;
+		07_multi_user) echo "$RUN_MULTI_USER" ;;
+		08_multi_user_reports) echo "$RUN_MULTI_USER_REPORT" ;;
+		09_score) echo "$RUN_SCORE" ;;
+		*) echo "true" ;;
+	esac
+}
 
 for i in $(ls -d $PWD/0*); do
+	run_flag=$(step_run_flag "$i")
+	if [ "$run_flag" != "true" ]; then
+		echo "Skipping $i (corresponding RUN_*=false)"
+		continue
+	fi
 	echo "$i/rollout.sh"
 	$i/rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $REFERENCE_TABLE_TYPE $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA
 done

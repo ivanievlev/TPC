@@ -53,6 +53,11 @@ tail -f tpcds.log
 - RUN_MULTI_USER_REPORT="true"
 - RUN_SCORE="true"
 
+	``Each RUN_*=false skips that step entirely in rollout.sh (the step script is not called).
+	RUN_*=true removes the step's end_*.log and runs it. RUN_MULTI_USER and RUN_MULTI_USER_REPORT
+	are independent: with MULTI_USER=false and MULTI_USER_REPORT=true the report still runs on
+	whatever is already in log/rollout_testing_*.log.``
+
 ## New Arenadata parameters
 
 - PARTITION_EVERY_FACTOR="1"
