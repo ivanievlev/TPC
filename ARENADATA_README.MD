@@ -28,6 +28,9 @@ nohup ./tpcds.sh > tpcds.log 2>&1 < tpcds.log &
 <watching the log>
 tail -f tpcds.log 
 
+When the run finishes successfully, the last line is:
+The end. All TPC-DS steps completed
+
 ```
 
 ## Basic parameters
