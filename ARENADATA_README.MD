@@ -132,7 +132,10 @@ tail -f tpcds.log
 - EXTERNAL_COMPRESSION="false"
 
 	``Used only when USE_EXTERNAL_FORMAT is parquet/csv/json. Default "false": do not pass COMPRESSION.
-	If set (e.g. "snappy", "zstd", "gzip"), COMPRESSION is added to the COPY options.``
+	If set (e.g. "snappy", "zstd", "gzip"), COMPRESSION is added to the COPY options.
+	For parquet the codec is stored inside the file and read_parquet needs no extra flag.
+	For csv/json the whole file is compressed but still named *.csv/*.json, so views also pass
+	compression => '<value>' to read_csv/read_json (otherwise DuckDB fails CSV sniffing).``
 
 - RUN_SQL_WITH_DUCKDB="false"
 

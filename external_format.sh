@@ -159,25 +159,39 @@ external_view_glob()
 	fi
 }
 
+# Extra read_* args when COPY wrote compressed csv/json (parquet codec is inside the file).
+# File names stay *.csv/*.json, so DuckDB cannot infer compression from the extension.
+external_view_compression_arg()
+{
+	case "${USE_EXTERNAL_FORMAT}" in
+		csv|json)
+			if [ "${EXTERNAL_COMPRESSION}" != "false" ] && [ -n "${EXTERNAL_COMPRESSION}" ]; then
+				echo ", compression => '${EXTERNAL_COMPRESSION}'"
+			fi
+			;;
+	esac
+}
+
 # FROM clause for CREATE VIEW (pg_duckdb read_*).
 external_build_view_from_clause()
 {
 	local table_dir=$1
 	local hive_flag=$2
-	local glob path_expr
+	local glob path_expr comp_arg
 	glob=$(external_view_glob "$table_dir")
 	path_expr="'${glob}'::text"
+	comp_arg=$(external_view_compression_arg)
 
 	case "${USE_EXTERNAL_FORMAT}" in
 		parquet)
 			echo "FROM read_parquet(${path_expr}, hive_partitioning => ${hive_flag}) r"
 			;;
 		csv)
-			echo "FROM read_csv(${path_expr}, header => true, delim => ',', hive_partitioning => ${hive_flag}) r"
+			echo "FROM read_csv(${path_expr}, header => true, delim => ',', hive_partitioning => ${hive_flag}${comp_arg}) r"
 			;;
 		json)
 			# read_json in pg_duckdb has no hive_partitioning arg; recursive glob covers hive dirs.
-			echo "FROM read_json(${path_expr}, format => 'newline_delimited') r"
+			echo "FROM read_json(${path_expr}, format => 'newline_delimited'${comp_arg}) r"
 			;;
 	esac
 }
