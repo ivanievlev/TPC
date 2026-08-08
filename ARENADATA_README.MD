@@ -5,7 +5,7 @@
 - Changed compression options from quicklz to zstd
 - Added new parameters
 - Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
-- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `PURGE_OLD_EXTERNAL_DATA`
+- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`
 
 ## Installation
 
@@ -152,6 +152,13 @@ The end. All TPC-DS steps completed
 	This frees space left by earlier scale/format runs (e.g. tpcds_3_parquet). When "false", those
 	directories are left as-is (current tree may still be removed if TRUNCATE_BEFORE_LOAD=true and
 	USE_EXTERNAL_FORMAT is parquet/csv/json).``
+
+- KILL_PREVIOUS_PROCESSES="true"
+
+	``At the start of tpcds.sh (after variables are printed), when "true" (default), find leftover
+	TPC-DS Linux processes from a previous unfinished run (tpcds.sh, rollout.sh, multi-user test.sh,
+	dsqgen, psql -f .../TPC-DS/...) and terminate them (TERM, then KILL). The current tpcds.sh and its
+	ancestors are never killed. When "false", no process cleanup is done.``
 
 - RUN_SQL_WITH_DUCKDB="false"
 

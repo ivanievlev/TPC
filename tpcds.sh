@@ -287,6 +287,11 @@ check_variables()
 		echo "PURGE_OLD_EXTERNAL_DATA=\"true\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
+	local count=$(grep "KILL_PREVIOUS_PROCESSES" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "KILL_PREVIOUS_PROCESSES=\"true\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
 
 	if [ "$new_variable" -gt "0" ]; then
 		echo "There are new variables in the tpcds_variables.sh file.  Please review to ensure the values are correct and then re-run this script."
@@ -495,8 +500,94 @@ echo_variables()
 	echo "EXTERNAL_COMPRESSION: $EXTERNAL_COMPRESSION"
 	echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
 	echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
+	echo "KILL_PREVIOUS_PROCESSES: $KILL_PREVIOUS_PROCESSES"
 	echo "############################################################################"
 	echo ""
+}
+
+# True if $1 is this process or an ancestor of this process (must not be killed).
+_tpcds_is_self_or_ancestor()
+{
+	local target=$1
+	local cur=$$
+	while [ -n "$cur" ] && [ "$cur" -gt 1 ]; do
+		if [ "$cur" = "$target" ]; then
+			return 0
+		fi
+		cur=$(ps -o ppid= -p "$cur" 2>/dev/null | tr -d ' ')
+	done
+	return 1
+}
+
+# TERM/KILL a process and its descendants (children first).
+_tpcds_kill_tree()
+{
+	local pid=$1
+	local sig=${2:-TERM}
+	local child
+	for child in $(pgrep -P "$pid" 2>/dev/null); do
+		_tpcds_kill_tree "$child" "$sig"
+	done
+	if kill -0 "$pid" 2>/dev/null; then
+		echo "  kill -$sig $pid: $(ps -p "$pid" -o args= 2>/dev/null | head -c 160)"
+		kill "-$sig" "$pid" 2>/dev/null || true
+	fi
+}
+
+# Stop leftover TPC-DS runs (previous tpcds.sh / rollout / test.sh / dsqgen / psql -f .../TPC-DS).
+# Does not touch the current tpcds.sh ($$) or its ancestors. Called before this run starts rollout.
+kill_previous_processes()
+{
+	local repo self pid candidates
+	local found=0
+
+	if [ "${KILL_PREVIOUS_PROCESSES:-true}" != "true" ]; then
+		echo "KILL_PREVIOUS_PROCESSES=false: leaving existing TPC-DS processes alone"
+		return 0
+	fi
+
+	self=$$
+	repo="${INSTALL_DIR}/${REPO}"
+	echo "KILL_PREVIOUS_PROCESSES=true: searching for leftover TPC-DS processes (excluding pid $self)..."
+
+	candidates=$(
+		{
+			pgrep -f "${repo}/tpcds\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/rollout\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/[0-9][^ ]*/rollout\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/07_multi_user/test\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/[^ ]*dsqgen" 2>/dev/null || true
+			pgrep -f "/tpcds\\.sh" 2>/dev/null || true
+			pgrep -f "[.]/tpcds\\.sh" 2>/dev/null || true
+			pgrep -f "psql .*-f ${repo}/" 2>/dev/null || true
+			pgrep -f "su -l .*${repo}.*rollout\\.sh" 2>/dev/null || true
+		} | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -u
+	)
+
+	for pid in $candidates; do
+		if _tpcds_is_self_or_ancestor "$pid"; then
+			continue
+		fi
+		found=1
+		_tpcds_kill_tree "$pid" TERM
+	done
+
+	if [ "$found" -eq 0 ]; then
+		echo "  (no leftover TPC-DS processes found)"
+		return 0
+	fi
+
+	sleep 2
+
+	for pid in $candidates; do
+		if _tpcds_is_self_or_ancestor "$pid"; then
+			continue
+		fi
+		if kill -0 "$pid" 2>/dev/null; then
+			_tpcds_kill_tree "$pid" KILL
+		fi
+	done
+	echo "Done killing leftover TPC-DS processes."
 }
 
 make_prerequisites()
@@ -537,6 +628,7 @@ yum_installs
 repo_init
 script_check
 echo_variables
+kill_previous_processes
 
 if [ "$MAKE_PREREQUISITES" == "true" ]; then
 	echo "Running make_prerequisites step"
