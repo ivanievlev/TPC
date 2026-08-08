@@ -129,17 +129,37 @@ for i in $(ls $PWD/*.tpcds.*.sql); do
 		schema_name=`echo $i | awk -F '.' '{print $2}'`
 		table_name=`echo $i | awk -F '.' '{print $3}'`
 		start_log
+		sql_outfile=$(mktemp)
+		sql_errfile=$(mktemp)
+		psql_rc=0
 		if [ "$EXPLAIN_ANALYZE" == "false" ]; then
 			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
-			tuples=$(psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l; exit ${PIPESTATUS[0]})
+			set +e
+			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i >"$sql_outfile" 2>"$sql_errfile"
+			psql_rc=$?
+			set -e
+			# Keep stderr visible in the step log (same as before when psql wrote to the terminal).
+			if [ -s "$sql_errfile" ]; then
+				cat "$sql_errfile" >&2
+			fi
+			tuples=$(wc -l < "$sql_outfile" | tr -d ' ')
 		else
 			myfilename=$(basename $i)
 			mylogfile=$PWD/../log/$myfilename.single.explain_analyze.log
 			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
-			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i > $mylogfile
+			set +e
+			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i >"$mylogfile" 2>"$sql_errfile"
+			psql_rc=$?
+			set -e
+			if [ -s "$sql_errfile" ]; then
+				cat "$sql_errfile" >&2
+			fi
 			tuples="0"
 		fi
+		QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
 		log $tuples
+		unset QUERY_STATUS
+		rm -f "$sql_outfile" "$sql_errfile"
 	done
 done
 

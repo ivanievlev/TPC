@@ -174,7 +174,48 @@ log()
 		tuples="0"
 	fi
 
-	printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" | tee -a  $LOCAL_PWD/log/$logfile 
+	# Optional 6th field for single-user SQL reports (see sql_query_status / QUERY_STATUS).
+	if [ -n "${QUERY_STATUS:-}" ]; then
+		qs=$(printf '%s' "$QUERY_STATUS" | tr '|\n\r\t' '    ' | sed 's/  */ /g' | head -c 500)
+		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d|%s\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" "$qs" | tee -a  $LOCAL_PWD/log/$logfile
+	else
+		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" | tee -a  $LOCAL_PWD/log/$logfile
+	fi
+}
+
+# Classify single-user SQL run from psql stderr + exit code → query_status for reports.
+sql_query_status()
+{
+	local errfile=$1
+	local rc=${2:-0}
+	local err=""
+
+	if [ -f "$errfile" ] && grep -Eiq 'canceling statement due to statement timeout|Executor Error: Query cancelled|query cancelled' "$errfile"; then
+		echo "cancelled due to timeout"
+		return 0
+	fi
+
+	if [ -f "$errfile" ]; then
+		err=$(grep -E 'ERROR:' "$errfile" | head -1 | sed -E 's/^.*ERROR:[[:space:]]*//' | tr '|\n\r\t' '    ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 400 || true)
+	fi
+	if [ -n "$err" ]; then
+		echo "ERROR:$err"
+		return 0
+	fi
+
+	if [ "$rc" -ne 0 ]; then
+		if [ -f "$errfile" ]; then
+			err=$(tr '\n\r\t|' '    ' < "$errfile" | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 400 || true)
+		fi
+		if [ -n "$err" ]; then
+			echo "ERROR:$err"
+		else
+			echo "ERROR:psql exit code $rc"
+		fi
+		return 0
+	fi
+
+	echo "succesfull"
 }
 
 end_step()
