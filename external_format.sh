@@ -14,6 +14,33 @@ external_data_root()
 	echo "/arenadata/tpcds_${GEN_DATA_SCALE}_${USE_EXTERNAL_FORMAT}"
 }
 
+# Remove leftover /arenadata/tpcds_*_{parquet,csv,json} trees from previous runs.
+# Called from 04_load when PURGE_OLD_EXTERNAL_DATA=true (any USE_EXTERNAL_FORMAT).
+purge_old_external_data()
+{
+	local d
+	local found=0
+
+	if [ "${PURGE_OLD_EXTERNAL_DATA:-true}" != "true" ]; then
+		echo "PURGE_OLD_EXTERNAL_DATA=${PURGE_OLD_EXTERNAL_DATA:-false}: keeping existing /arenadata/tpcds_*_{parquet,csv,json}"
+		return 0
+	fi
+
+	echo "PURGE_OLD_EXTERNAL_DATA=true: removing previous external data under /arenadata/tpcds_*_{parquet,csv,json}"
+	shopt -s nullglob
+	for d in /arenadata/tpcds_*_parquet /arenadata/tpcds_*_csv /arenadata/tpcds_*_json; do
+		if [ -d "$d" ] || [ -e "$d" ]; then
+			found=1
+			echo "  rm -rf $d"
+			rm -rf "$d"
+		fi
+	done
+	shopt -u nullglob
+	if [ "$found" -eq 0 ]; then
+		echo "  (nothing to remove)"
+	fi
+}
+
 external_table_dir()
 {
 	local table_name=$1

@@ -12,14 +12,23 @@ EXTERNAL_HIVE_PARTITIONING=${30}
 EXTERNAL_FILE_SIZE_BYTES=${31}
 EXTERNAL_COMPRESSION=${32}
 RUN_SQL_WITH_DUCKDB=${33}
+PURGE_OLD_EXTERNAL_DATA=${34}
 
 TRUNCATE_BEFORE_LOAD=$9
 step=load
 init_log $step
 source $PWD/../external_format.sh
 
+if [ -z "$PURGE_OLD_EXTERNAL_DATA" ]; then
+	PURGE_OLD_EXTERNAL_DATA="true"
+fi
+
 echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
 echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
+echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
+
+# Free disk from previous parquet/csv/json runs (e.g. /arenadata/tpcds_3_parquet).
+purge_old_external_data
 if { [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; } && [ -z "$GEN_DATA_SCALE" ]; then
 	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path /arenadata/tpcds_<scale>_${USE_EXTERNAL_FORMAT}/"
 	exit 1
@@ -102,7 +111,8 @@ get_count_load_data()
 
 
 if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; then
-	if [ "$TRUNCATE_BEFORE_LOAD" == "true" ]; then
+	# Current tree may already be gone via PURGE_OLD_EXTERNAL_DATA; still honour truncate when purge is off.
+	if [ "$PURGE_OLD_EXTERNAL_DATA" != "true" ] && [ "$TRUNCATE_BEFORE_LOAD" == "true" ]; then
 		echo "Removing existing ${USE_EXTERNAL_FORMAT} tree $(external_data_root)"
 		rm -rf "$(external_data_root)"
 	fi

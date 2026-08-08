@@ -5,7 +5,7 @@
 - Changed compression options from quicklz to zstd
 - Added new parameters
 - Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
-- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`
+- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `PURGE_OLD_EXTERNAL_DATA`
 
 ## Installation
 
@@ -136,6 +136,14 @@ tail -f tpcds.log
 	For parquet the codec is stored inside the file and read_parquet needs no extra flag.
 	For csv/json the whole file is compressed but still named *.csv/*.json, so views also pass
 	compression => '<value>' to read_csv/read_json (otherwise DuckDB fails CSV sniffing).``
+
+- PURGE_OLD_EXTERNAL_DATA="true"
+
+	``On step 04_load, when "true" (default), delete previous external data directories matching
+	/arenadata/tpcds_*_parquet, /arenadata/tpcds_*_csv and /arenadata/tpcds_*_json before loading.
+	This frees space left by earlier scale/format runs (e.g. tpcds_3_parquet). When "false", those
+	directories are left as-is (current tree may still be removed if TRUNCATE_BEFORE_LOAD=true and
+	USE_EXTERNAL_FORMAT is parquet/csv/json).``
 
 - RUN_SQL_WITH_DUCKDB="false"
 
