@@ -157,8 +157,9 @@ The end. All TPC-DS steps completed
 
 	``At the start of tpcds.sh (after variables are printed), when "true" (default), find leftover
 	TPC-DS Linux processes from a previous unfinished run (tpcds.sh, rollout.sh, multi-user test.sh,
-	dsqgen, psql -f .../TPC-DS/...) and terminate them (TERM, then KILL). The current tpcds.sh and its
-	ancestors are never killed. When "false", no process cleanup is done.``
+	dsqgen, psql -f .../TPC-DS/...) and terminate them (TERM, then KILL). Also runs pg_terminate_backend
+	on leftover client sessions in DBNAME so orphan queries cannot block DROP SCHEMA/DDL. The current
+	tpcds.sh and its ancestors are never killed. When "false", no process cleanup is done.``
 
 - RUN_SQL_WITH_DUCKDB="false"
 

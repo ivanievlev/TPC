@@ -587,6 +587,22 @@ kill_previous_processes()
 			_tpcds_kill_tree "$pid" KILL
 		fi
 	done
+
+	# Terminate leftover client backends in DBNAME (orphan queries hold locks after
+	# clients are killed; DROP SCHEMA / DDL would hang otherwise). Safe for a
+	# dedicated benchmark database — does not use kill -9 on postgres processes.
+	if command -v psql >/dev/null 2>&1 && [ -n "${DBNAME:-}" ] && [ -n "${ADMIN_USER:-}" ]; then
+		echo "Terminating leftover client backends in database $DBNAME..."
+		su -l "$ADMIN_USER" -c "psql -d \"$DBNAME\" -v ON_ERROR_STOP=0 -q -c \"
+SELECT pg_terminate_backend(pid) AS terminated, pid, left(query, 80) AS query
+FROM pg_stat_activity
+WHERE datname = current_database()
+  AND pid <> pg_backend_pid()
+  AND backend_type = 'client backend';
+\"" 2>/dev/null || true
+		sleep 1
+	fi
+
 	echo "Done killing leftover TPC-DS processes."
 }
 
