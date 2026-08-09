@@ -31,4 +31,3 @@ CREATE TABLE tpcds.call_center (
     cc_gmt_offset numeric(5,2),
     cc_tax_percentage numeric(5,2)
 );
-ALTER TABLE tpcds.call_center ADD PRIMARY KEY (cc_call_center_sk);

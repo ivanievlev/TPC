@@ -6,4 +6,3 @@ CREATE TABLE tpcds.ship_mode (
     sm_carrier character varying(20),
     sm_contract character varying(20)
 );
-alter table tpcds.ship_mode add primary key (sm_ship_mode_sk);

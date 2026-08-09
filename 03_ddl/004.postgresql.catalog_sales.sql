@@ -35,4 +35,3 @@ CREATE TABLE tpcds.catalog_sales (
     cs_net_profit numeric(7,2)
 );
 
-alter table tpcds.catalog_sales add primary key (cs_item_sk, cs_order_number);

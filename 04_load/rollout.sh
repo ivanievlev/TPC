@@ -256,7 +256,7 @@ else
 			schema_name=$schema_name
 			table_name=$table_name
 			filename="'""$raw_filename""'"
-			tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -f $sql_file -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
+			tuples=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -c "SET synchronous_commit TO off;" -f $sql_file -v filename="$filename" | grep COPY | awk -F ' ' '{print $2}'; exit ${PIPESTATUS[0]})
 			log $tuples >/dev/null
 			echo "[DONE] $table_name $(basename "$raw_filename") tuples=$tuples"
 		) &
@@ -293,11 +293,47 @@ else
 		exit 1
 	fi
 	echo "All parallel COPY jobs finished successfully."
+
+	# После загрузки данных: PRIMARY KEY и индексы (как в TPC-H).
+	# Каждый statement из constraints_after_load.sql — отдельно, со своим таймингом в логе.
+	echo "creating primary keys and indexes after load"
+	max_load_id=$(ls $PWD/*.$filter.*.sql | tail -1)
+	constraint_id=$(basename "$max_load_id" | awk -F '.' '{print $1}' | sed 's/^0*//')
+	constraint_id=$((constraint_id + 1))
+	while IFS= read -r stmt || [ -n "$stmt" ]; do
+		# пропускаем пустые строки и комментарии
+		[[ "$stmt" =~ ^[[:space:]]*$ ]] && continue
+		[[ "$stmt" =~ ^[[:space:]]*-- ]] && continue
+		stmt="${stmt%"${stmt##*[![:space:]]}"}"  # trim trailing whitespace
+		[[ "$stmt" != *\; ]] && continue
+
+		# метка для лога: имя PK / INDEX
+		if [[ "$stmt" =~ CREATE[[:space:]]+INDEX[[:space:]]+([a-zA-Z0-9_]+) ]]; then
+			table_name="${BASH_REMATCH[1]}"
+		elif [[ "$stmt" =~ ALTER[[:space:]]+TABLE[[:space:]]+tpcds\.([a-zA-Z0-9_]+)[[:space:]]+ADD[[:space:]]+PRIMARY[[:space:]]+KEY ]]; then
+			table_name="${BASH_REMATCH[1]}_pkey"
+		else
+			table_name="constraint_${constraint_id}"
+		fi
+
+		start_log
+		schema_name="tpcds"
+		# log() берёт id из basename $i до первой точки
+		i=$(printf "%03d.tpcds.%s.sql" "$constraint_id" "$table_name")
+		echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -c \"SET synchronous_commit TO off;\" -c \"$stmt\""
+		psql -d $DBNAME -v ON_ERROR_STOP=1 -c "SET synchronous_commit TO off;" -c "$stmt"
+		log 0
+		constraint_id=$((constraint_id + 1))
+	done < "$PWD/constraints_after_load.sql"
 fi
 
 
-max_id=$(ls $PWD/*.sql | tail -1)
+max_id=$(ls $PWD/*.$filter.*.sql | tail -1)
 i=$(basename $max_id | awk -F '.' '{print $1}' | sed 's/^0*//')
+# Continue log ids after post-load constraints (postgresql), not back at COPY sql numbers.
+if [ -n "${constraint_id:-}" ]; then
+	i=$constraint_id
+fi
 
 if [[ "$VERSION" == *"gpdb"* ]]; then
 	dbname="$PGDATABASE"

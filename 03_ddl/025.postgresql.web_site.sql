@@ -26,4 +26,3 @@ CREATE TABLE tpcds.web_site (
     web_gmt_offset numeric(5,2),
     web_tax_percentage numeric(5,2)
 );
-alter table tpcds.web_site add primary key (web_site_sk);

@@ -14,4 +14,3 @@ CREATE TABLE tpcds.web_page (
     wp_image_count integer,
     wp_max_ad_count integer
 );
-alter table tpcds.web_page add primary key (wp_web_page_sk);

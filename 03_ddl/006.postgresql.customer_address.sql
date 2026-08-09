@@ -13,4 +13,3 @@ CREATE TABLE tpcds.customer_address (
     ca_gmt_offset numeric(5,2),
     ca_location_type character varying(20)
 );
-alter table tpcds.customer_address add primary key (ca_address_sk);

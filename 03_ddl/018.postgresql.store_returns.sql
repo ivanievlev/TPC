@@ -21,4 +21,3 @@ CREATE TABLE tpcds.store_returns (
     sr_net_loss numeric(7,2)
 );
 
-alter table tpcds.store_returns add primary key (sr_item_sk, sr_ticket_number);

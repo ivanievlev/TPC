@@ -14,4 +14,3 @@ CREATE TABLE tpcds.warehouse (
     w_country character varying(20),
     w_gmt_offset numeric(5,2)
 );
-alter table tpcds.warehouse add primary key (w_warehouse_sk);

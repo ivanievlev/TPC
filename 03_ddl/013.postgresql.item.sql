@@ -22,4 +22,3 @@ CREATE TABLE tpcds.item (
     i_manager_id integer,
     i_product_name character varying(50)
 );
-alter table tpcds.item add primary key (i_item_sk);

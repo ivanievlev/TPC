@@ -5,4 +5,3 @@ CREATE TABLE tpcds.household_demographics (
     hd_dep_count integer,
     hd_vehicle_count integer
 );
-alter table tpcds.household_demographics add primary key (hd_demo_sk);

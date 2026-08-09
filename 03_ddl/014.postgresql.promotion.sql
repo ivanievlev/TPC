@@ -19,4 +19,3 @@ CREATE TABLE tpcds.promotion (
     p_purpose character varying(15),
     p_discount_active character(1)
 );
-alter table tpcds.promotion add primary key (p_promo_sk);

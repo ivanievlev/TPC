@@ -9,4 +9,3 @@ CREATE TABLE tpcds.customer_demographics (
     cd_dep_employed_count integer,
     cd_dep_college_count integer
 );
-alter table tpcds.customer_demographics add primary key (cd_demo_sk);

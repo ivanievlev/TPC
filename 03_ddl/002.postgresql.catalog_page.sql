@@ -9,4 +9,3 @@ CREATE TABLE tpcds.catalog_page (
     cp_description character varying(100),
     cp_type character varying(100)
 );
-ALTER TABLE tpcds.catalog_page ADD PRIMARY KEY (cp_catalog_page_sk);
