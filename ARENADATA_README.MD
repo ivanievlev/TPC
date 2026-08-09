@@ -128,14 +128,17 @@ The end. All TPC-DS steps completed
 - EXTERNAL_HIVE_PARTITIONING="false"
 
 	``Used only when USE_EXTERNAL_FORMAT is parquet/csv/json. Default "false": flat dirs and hive_partitioning => false for read_parquet/read_csv.
-	If set to "year, month", fact tables with a date_sk (inventory, store_sales/returns, catalog_sales/returns, web_sales/returns) are written with
+	If set to "true" or "year, month", fact tables with a date_sk (inventory, store_sales/returns, catalog_sales/returns, web_sales/returns) are written with
 	PARTITION_BY (year, month) hive directories (year/month taken from date_dim). Views for parquet/csv use hive_partitioning => true;
-	read_json has no hive_partitioning argument, so json views use a recursive **/*.json glob.``
+	read_json has no hive_partitioning argument, so json views use a recursive **/*.json glob.
+	Incompatible with EXTERNAL_FILE_SIZE_BYTES other than "-1" (startup error).``
 
 - EXTERNAL_FILE_SIZE_BYTES="-1"
 
 	``Used only when USE_EXTERNAL_FORMAT is parquet/csv/json. Default "-1": do not pass FILE_SIZE_BYTES (no forced chunking; a single data.<ext> is written when hive is off).
-	If set (e.g. "1GB"), FILE_SIZE_BYTES is added to the COPY options and files are split accordingly.``
+	If set (e.g. "1GB"), FILE_SIZE_BYTES is added to the COPY options and files are split accordingly.
+	Incompatible with EXTERNAL_HIVE_PARTITIONING enabled: DuckDB cannot combine FILE_SIZE_BYTES and PARTITION_BY;
+	the run fails at startup asking to keep only one of the two.``
 
 - EXTERNAL_COMPRESSION="false"
 

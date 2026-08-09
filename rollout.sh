@@ -84,6 +84,16 @@ case "$USE_EXTERNAL_FORMAT" in
 			echo "${USE_EXTERNAL_FORMAT} files can't be processed without DuckDB. Change format or activate DuckDB"
 			exit 1
 		fi
+		# DuckDB: COPY cannot combine FILE_SIZE_BYTES and PARTITION_BY (hive).
+		hive_on=$(echo "${EXTERNAL_HIVE_PARTITIONING}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+		if [ "$hive_on" != "false" ] && [ -n "$hive_on" ] && \
+			[ "${EXTERNAL_FILE_SIZE_BYTES}" != "-1" ] && [ -n "${EXTERNAL_FILE_SIZE_BYTES}" ]; then
+			echo "ERROR: EXTERNAL_HIVE_PARTITIONING (${EXTERNAL_HIVE_PARTITIONING}) and EXTERNAL_FILE_SIZE_BYTES (${EXTERNAL_FILE_SIZE_BYTES}) are incompatible."
+			echo "DuckDB cannot combine PARTITION_BY and FILE_SIZE_BYTES in COPY. Keep only one of the two:"
+			echo "  - hive: EXTERNAL_HIVE_PARTITIONING=<enabled> and EXTERNAL_FILE_SIZE_BYTES=\"-1\""
+			echo "  - sized files: EXTERNAL_HIVE_PARTITIONING=\"false\" and EXTERNAL_FILE_SIZE_BYTES=<size>"
+			exit 1
+		fi
 		;;
 	*)
 		echo "ERROR: USE_EXTERNAL_FORMAT must be \"false\", \"parquet\", \"csv\" or \"json\" (got: $USE_EXTERNAL_FORMAT)"
