@@ -5,7 +5,7 @@
 - Changed compression options from quicklz to zstd
 - Added new parameters
 - Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
-- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`
+- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`
 
 ## Installation
 
@@ -127,8 +127,9 @@ The end. All TPC-DS steps completed
 
 - EXTERNAL_HIVE_PARTITIONING="false"
 
-	``Used only when USE_EXTERNAL_FORMAT is parquet/csv/json. Default "false": flat dirs and hive_partitioning => false for read_parquet/read_csv.
-	If set to "true" or "year, month", fact tables with a date_sk (inventory, store_sales/returns, catalog_sales/returns, web_sales/returns) are written with
+	``Used only when USE_EXTERNAL_FORMAT is parquet/csv/json. Allowed values: "true" or "false" (default "false").
+	If "false": flat dirs and hive_partitioning => false for read_parquet/read_csv.
+	If "true": fact tables with a date_sk (inventory, store_sales/returns, catalog_sales/returns, web_sales/returns) are written with
 	PARTITION_BY (year, month) hive directories (year/month taken from date_dim). Views for parquet/csv use hive_partitioning => true;
 	read_json has no hive_partitioning argument, so json views use a recursive **/*.json glob.
 	Incompatible with EXTERNAL_FILE_SIZE_BYTES other than "-1" (startup error).``
@@ -167,12 +168,23 @@ The end. All TPC-DS steps completed
 - RUN_SQL_WITH_DUCKDB="false"
 
 	``PostgreSQL/pg_duckdb only. Default "false": steps 05 and 07 run as usual on Postgres.
-	If "true", those steps set duckdb.force_execution TO true for each query session. With USE_EXTERNAL_FORMAT="false" DuckDB reads heap tables;
+	If "true", those steps set duckdb.force_execution TO true for each query session, plus duckdb.memory_limit / duckdb.threads
+	from DUCKDB_MEMORY_LIMIT / DUCKDB_THREADS. With USE_EXTERNAL_FORMAT="false" DuckDB reads heap tables;
 	with parquet/csv/json DuckDB reads the corresponding views.
 	Validation: USE_EXTERNAL_FORMAT in {parquet,csv,json} requires RUN_SQL_WITH_DUCKDB="true", otherwise the run fails with:
 	"<format> files can't be processed without DuckDB. Change format or activate DuckDB".
 	At the start of the run, if RUN_SQL_WITH_DUCKDB="true", the script checks that extension pg_duckdb is present in
 	pg_available_extensions and runs CREATE EXTENSION IF NOT EXISTS pg_duckdb; otherwise it exits with an error.``
+
+- DUCKDB_MEMORY_LIMIT="4GB"
+
+	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.memory_limit for each query session in steps 05 and 07.
+	Default "4GB". Raise this (e.g. "16GB") if queries hit DuckDB Out of Memory errors.``
+
+- DUCKDB_THREADS="-1"
+
+	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.threads for each query session in steps 05 and 07.
+	Default "-1" (DuckDB chooses).``
 
 ## Parameters that are set during 02_init phase: Resource Groups limits (only for admin_group) and network sysctl parameters 
 

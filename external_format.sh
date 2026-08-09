@@ -113,10 +113,7 @@ external_hive_enabled()
 {
 	local v
 	v=$(echo "${EXTERNAL_HIVE_PARTITIONING}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
-	if [ "$v" = "false" ] || [ -z "$v" ]; then
-		return 1
-	fi
-	return 0
+	[ "$v" = "true" ]
 }
 
 # Parse CREATE TABLE columns from a 03_ddl/*.postgresql.<table>.sql file.

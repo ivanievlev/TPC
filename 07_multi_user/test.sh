@@ -13,6 +13,8 @@ SQL_ON_ERROR_STOP=$5
 DBNAME=$6
 STATEMENT_TIMEOUT=$7
 RUN_SQL_WITH_DUCKDB=$8
+DUCKDB_MEMORY_LIMIT=$9
+DUCKDB_THREADS=$10
 
 if [[ "$GEN_DATA_SCALE" == "" || "$session_id" == "" || "$EXPLAIN_ANALYZE" == "" ]]; then
 	echo "Error: you must provide the scale, the session id, and true/false to run explain analyze as parameters."
@@ -25,6 +27,12 @@ if [ -z "$STATEMENT_TIMEOUT" ]; then
 fi
 if [ -z "$RUN_SQL_WITH_DUCKDB" ]; then
 	RUN_SQL_WITH_DUCKDB="false"
+fi
+if [ -z "$DUCKDB_MEMORY_LIMIT" ]; then
+	DUCKDB_MEMORY_LIMIT="4GB"
+fi
+if [ -z "$DUCKDB_THREADS" ]; then
+	DUCKDB_THREADS="-1"
 fi
 
 source_bashrc
@@ -42,6 +50,8 @@ fi
 PSQL_SESSION_SETS="SET statement_timeout='$STATEMENT_TIMEOUT';"
 if [ "$RUN_SQL_WITH_DUCKDB" == "true" ]; then
 	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.force_execution TO true;"
+	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.memory_limit TO '$DUCKDB_MEMORY_LIMIT';"
+	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.threads TO $DUCKDB_THREADS;"
 fi
 
 

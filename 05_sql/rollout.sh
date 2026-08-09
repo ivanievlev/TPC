@@ -23,6 +23,8 @@ EXTERNAL_HIVE_PARTITIONING=${30}
 EXTERNAL_FILE_SIZE_BYTES=${31}
 EXTERNAL_COMPRESSION=${32}
 RUN_SQL_WITH_DUCKDB=${33}
+DUCKDB_MEMORY_LIMIT=${35}
+DUCKDB_THREADS=${36}
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
 	echo "You must provide the scale as a parameter in terms of Gigabytes, true/false to run queries with EXPLAIN ANALYZE option, true/false to use random distrbution, multi-user count, and the number of sql iterations."
@@ -35,6 +37,12 @@ fi
 if [ -z "$RUN_SQL_WITH_DUCKDB" ]; then
 	RUN_SQL_WITH_DUCKDB="false"
 fi
+if [ -z "$DUCKDB_MEMORY_LIMIT" ]; then
+	DUCKDB_MEMORY_LIMIT="4GB"
+fi
+if [ -z "$DUCKDB_THREADS" ]; then
+	DUCKDB_THREADS="-1"
+fi
 
 step=sql
 init_log $step
@@ -42,6 +50,8 @@ init_log $step
 echo "SQL_ON_ERROR_STOP = $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT = $STATEMENT_TIMEOUT"
 echo "RUN_SQL_WITH_DUCKDB = $RUN_SQL_WITH_DUCKDB"
+echo "DUCKDB_MEMORY_LIMIT = $DUCKDB_MEMORY_LIMIT"
+echo "DUCKDB_THREADS = $DUCKDB_THREADS"
 echo "USE_EXTERNAL_FORMAT = $USE_EXTERNAL_FORMAT"
 if [ "$SQL_ON_ERROR_STOP" == "true" ]; then
 	ON_ERROR_STOP=1
@@ -52,6 +62,8 @@ fi
 PSQL_SESSION_SETS="SET statement_timeout='$STATEMENT_TIMEOUT';"
 if [ "$RUN_SQL_WITH_DUCKDB" == "true" ]; then
 	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.force_execution TO true;"
+	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.memory_limit TO '$DUCKDB_MEMORY_LIMIT';"
+	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.threads TO $DUCKDB_THREADS;"
 fi
 
 get_version
