@@ -14,7 +14,9 @@ DBNAME=$6
 STATEMENT_TIMEOUT=$7
 RUN_SQL_WITH_DUCKDB=$8
 DUCKDB_MEMORY_LIMIT=$9
-DUCKDB_THREADS=$10
+DUCKDB_THREADS=${10}
+DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${11}
+DUCKDB_THREADS_FOR_POSTGRES_SCAN=${12}
 
 if [[ "$GEN_DATA_SCALE" == "" || "$session_id" == "" || "$EXPLAIN_ANALYZE" == "" ]]; then
 	echo "Error: you must provide the scale, the session id, and true/false to run explain analyze as parameters."
@@ -34,6 +36,12 @@ fi
 if [ -z "$DUCKDB_THREADS" ]; then
 	DUCKDB_THREADS="-1"
 fi
+if [ -z "$DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN" ]; then
+	DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"
+fi
+if [ -z "$DUCKDB_THREADS_FOR_POSTGRES_SCAN" ]; then
+	DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
+fi
 
 source_bashrc
 
@@ -52,6 +60,8 @@ if [ "$RUN_SQL_WITH_DUCKDB" == "true" ]; then
 	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.force_execution TO true;"
 	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.memory_limit TO '$DUCKDB_MEMORY_LIMIT';"
 	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.threads TO $DUCKDB_THREADS;"
+	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.max_workers_per_postgres_scan TO $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN;"
+	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.threads_for_postgres_scan TO $DUCKDB_THREADS_FOR_POSTGRES_SCAN;"
 fi
 
 

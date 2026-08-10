@@ -5,7 +5,7 @@
 - Changed compression options from quicklz to zstd
 - Added new parameters
 - Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
-- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`
+- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN`, `DUCKDB_THREADS_FOR_POSTGRES_SCAN`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`
 
 ## Installation
 
@@ -30,6 +30,10 @@ tail -f tpcds.log
 
 When the run finishes successfully, the last line is:
 The end. All TPC-DS steps completed
+
+A timestamped copy of `tpcds.log` is also saved under `log/`:
+`tpcds_SF<scale>_<format>[_with-duckdb]_<YYYYMMDD_HHMMSS>.log`
+(`format` is `heap`, or `parquet`/`csv`/`json`; `_with-duckdb` only when `RUN_SQL_WITH_DUCKDB=true`).
 
 ```
 
@@ -168,8 +172,9 @@ The end. All TPC-DS steps completed
 - RUN_SQL_WITH_DUCKDB="false"
 
 	``PostgreSQL/pg_duckdb only. Default "false": steps 05 and 07 run as usual on Postgres.
-	If "true", those steps set duckdb.force_execution TO true for each query session, plus duckdb.memory_limit / duckdb.threads
-	from DUCKDB_MEMORY_LIMIT / DUCKDB_THREADS. With USE_EXTERNAL_FORMAT="false" DuckDB reads heap tables;
+	If "true", those steps set duckdb.force_execution TO true for each query session, plus duckdb.memory_limit / duckdb.threads /
+	duckdb.max_workers_per_postgres_scan / duckdb.threads_for_postgres_scan from the corresponding DUCKDB_* variables.
+	With USE_EXTERNAL_FORMAT="false" DuckDB reads heap tables;
 	with parquet/csv/json DuckDB reads the corresponding views.
 	Validation: USE_EXTERNAL_FORMAT in {parquet,csv,json} requires RUN_SQL_WITH_DUCKDB="true", otherwise the run fails with:
 	"<format> files can't be processed without DuckDB. Change format or activate DuckDB".
@@ -185,6 +190,16 @@ The end. All TPC-DS steps completed
 
 	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.threads for each query session in steps 05 and 07.
 	Default "-1" (DuckDB chooses).``
+
+- DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"
+
+	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.max_workers_per_postgres_scan for each query session in steps 05 and 07.
+	Default "2" (pg_duckdb boot default).``
+
+- DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
+
+	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.threads_for_postgres_scan for each query session in steps 05 and 07.
+	Default "2" (pg_duckdb boot default).``
 
 ## Parameters that are set during 02_init phase: Resource Groups limits (only for admin_group) and network sysctl parameters 
 

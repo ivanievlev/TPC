@@ -302,6 +302,16 @@ check_variables()
 		echo "DUCKDB_THREADS=\"-1\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
+	local count=$(grep "DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=\"2\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "DUCKDB_THREADS_FOR_POSTGRES_SCAN" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "DUCKDB_THREADS_FOR_POSTGRES_SCAN=\"2\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
 
 	if [ "$new_variable" -gt "0" ]; then
 		echo "There are new variables in the tpcds_variables.sh file.  Please review to ensure the values are correct and then re-run this script."
@@ -511,6 +521,8 @@ echo_variables()
 	echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
 	echo "DUCKDB_MEMORY_LIMIT: $DUCKDB_MEMORY_LIMIT"
 	echo "DUCKDB_THREADS: $DUCKDB_THREADS"
+	echo "DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN: $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN"
+	echo "DUCKDB_THREADS_FOR_POSTGRES_SCAN: $DUCKDB_THREADS_FOR_POSTGRES_SCAN"
 	echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
 	echo "KILL_PREVIOUS_PROCESSES: $KILL_PREVIOUS_PROCESSES"
 	echo "############################################################################"
@@ -644,6 +656,39 @@ run_after_rollout()
 	echo "Finish."
 }
 
+archive_tpcds_log()
+{
+	local format="heap"
+	local duck_suffix=""
+	local ts dest src log_dir
+
+	case "${USE_EXTERNAL_FORMAT}" in
+		parquet|csv|json) format="$USE_EXTERNAL_FORMAT" ;;
+	esac
+	if [ "${RUN_SQL_WITH_DUCKDB}" = "true" ]; then
+		duck_suffix="_with-duckdb"
+	fi
+
+	log_dir="$INSTALL_DIR/$REPO/log"
+	mkdir -p "$log_dir"
+	ts=$(date +%Y%m%d_%H%M%S)
+	dest="$log_dir/tpcds_SF${GEN_DATA_SCALE}_${format}${duck_suffix}_${ts}.log"
+
+	src=""
+	if [ -f "$INSTALL_DIR/$REPO/tpcds.log" ]; then
+		src="$INSTALL_DIR/$REPO/tpcds.log"
+	elif [ -f "./tpcds.log" ]; then
+		src="./tpcds.log"
+	fi
+
+	if [ -n "$src" ]; then
+		cp -a "$src" "$dest"
+		echo "Archived run log: $dest"
+	else
+		echo "WARNING: tpcds.log not found; skipped archive copy"
+	fi
+}
+
 
 ##################################################################################################################################################
 # Body
@@ -664,10 +709,13 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS"
+su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN"
 
 # Final marker for tpcds.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).
 echo ""
 echo "The end. All TPC-DS steps completed"
+
+# Keep rewriting tpcds.log each run; also archive a timestamped copy under log/.
+archive_tpcds_log
 

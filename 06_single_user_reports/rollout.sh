@@ -50,6 +50,11 @@ echo "**************************************************************************
 psql -d $DBNAME -F $'\t' -A -v ON_ERROR_STOP=1 -P pager=off -f $PWD/loads_report.sql
 echo ""
 echo "********************************************************************************"
+echo "Constraints after load"
+echo "********************************************************************************"
+psql -d $DBNAME -F $'\t' -A -v ON_ERROR_STOP=1 -P pager=off -f $PWD/constraints_report.sql
+echo ""
+echo "********************************************************************************"
 echo "Analyze"
 echo "********************************************************************************"
 psql -d $DBNAME -F $'\t' -A -v ON_ERROR_STOP=1 -P pager=off -f $PWD/analyze_report.sql

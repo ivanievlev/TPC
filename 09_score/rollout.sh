@@ -21,10 +21,28 @@ fi
 step="score"
 init_log $step
 
-load_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select sum(extract('epoch' from duration)) from tpcds_reports.load where tuples > 0")
-analyze_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select sum(extract('epoch' from duration)) from tpcds_reports.load where tuples = 0")
-queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select sum(extract('epoch' from duration)) from (SELECT split_part(description, '.', 2) AS id,  min(duration) AS duration FROM tpcds_reports.sql GROUP BY split_part(description, '.', 2)) as sub")
-concurrent_queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select sum(extract('epoch' from duration)) from tpcds_testing.sql")
+# Load: COPY / external convert rows (tuples > 0)
+load_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from tpcds_reports.load where tuples > 0")
+# Constraints after load: PK / indexes (tuples = 0, name patterns)
+constraints_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "
+select coalesce(sum(extract('epoch' from duration)),0)
+from tpcds_reports.load
+where tuples = 0
+  and (
+       split_part(description, '.', 2) like 'idx\_%' escape '\'
+       or split_part(description, '.', 2) like '%\_pkey' escape '\'
+       or split_part(description, '.', 2) like 'constraint\_%' escape '\'
+      )")
+# Analyze: only ANALYZE commands (tuples = 0, not constraints)
+analyze_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "
+select coalesce(sum(extract('epoch' from duration)),0)
+from tpcds_reports.load
+where tuples = 0
+  and split_part(description, '.', 2) not like 'idx\_%' escape '\'
+  and split_part(description, '.', 2) not like '%\_pkey' escape '\'
+  and split_part(description, '.', 2) not like 'constraint\_%' escape '\'")
+queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from (SELECT split_part(description, '.', 2) AS id,  min(duration) AS duration FROM tpcds_reports.sql GROUP BY split_part(description, '.', 2)) as sub")
+concurrent_queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from tpcds_testing.sql")
 
 q=$((3*MULTI_USER_COUNT*99))
 
@@ -37,6 +55,7 @@ score=$(echo "$num_score/$dem_score" | bc)
 
 echo -e "Scale Factor\t$GEN_DATA_SCALE"
 echo -e "Load\t$load_time"
+echo -e "Constraints after load\t$constraints_time"
 echo -e "Analyze\t$analyze_time"
 echo -e "1 User Queries\t$queries_time"
 echo -e "Concurrent Queries\t$concurrent_queries_time"

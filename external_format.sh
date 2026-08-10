@@ -424,19 +424,32 @@ convert_table_dat_to_external()
 		fi
 	} > "$sql_file"
 
-	if ! psql -d "$DBNAME" -v ON_ERROR_STOP=1 -f "$sql_file"; then
-		rm -f "$sql_file"
+	local psql_out convert_rc=0
+	set +e
+	psql_out=$(psql -d "$DBNAME" -v ON_ERROR_STOP=1 -f "$sql_file" 2>&1)
+	convert_rc=$?
+	set -e
+	# Keep convert output visible in tpcds.log / step stdout.
+	echo "$psql_out"
+	rm -f "$sql_file"
+	CONVERT_LAST_TUPLES=$(printf '%s\n' "$psql_out" | awk '/^COPY / {s+=$2} END{print s+0}')
+	if [ "$convert_rc" -ne 0 ]; then
 		echo "ERROR: psql convert failed for $table_name"
+		CONVERT_LAST_TUPLES=0
 		return 1
 	fi
-	rm -f "$sql_file"
 
 	# Reject empty / non-parquet leftovers from failed writes.
 	local out_bytes
 	out_bytes=$(find "$table_dir" -type f \( -name "*.${ext}" -o -name "*.parquet" -o -name "*.csv" -o -name "*.json" \) -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}')
 	if [ "${out_bytes:-0}" -le 0 ]; then
 		echo "ERROR: no output data written for $table_name under $table_dir"
+		CONVERT_LAST_TUPLES=0
 		return 1
+	fi
+	# Ensure Data Loads report sees the row even if COPY count was not printed.
+	if [ "${CONVERT_LAST_TUPLES:-0}" -le 0 ]; then
+		CONVERT_LAST_TUPLES=1
 	fi
 	return 0
 }
@@ -471,14 +484,16 @@ load_external_from_dat()
 			continue
 		fi
 
-		schema_name="tpcds"
+		# description = <format>.<table> so loads_report / Data Loads shows each external COPY.
+		schema_name="$USE_EXTERNAL_FORMAT"
 		i=$ddl_file
 		id=$(basename "$ddl_file" | awk -F '.' '{print $1}')
 		start_log
 		echo "${USE_EXTERNAL_FORMAT} convert: $table_name"
 		echo "  source glob: $(external_dat_glob "$table_name")"
+		CONVERT_LAST_TUPLES=0
 		if convert_table_dat_to_external "$table_name" "$ddl_file"; then
-			log 0
+			log "${CONVERT_LAST_TUPLES:-1}"
 		else
 			fail=1
 			log 0
