@@ -1,6 +1,6 @@
 SELECT split_part(description, '.', 2) AS id,
        max(tuples) AS tuples,
-       min(extract('epoch' from duration)) AS duration,
+       round(min(extract('epoch' from duration))::numeric, 3) AS duration,
        (array_agg(query_status ORDER BY
           CASE
             WHEN query_status LIKE 'ERROR:%' THEN 0

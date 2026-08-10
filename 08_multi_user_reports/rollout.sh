@@ -38,7 +38,7 @@ done
 
 psql -d $DBNAME -v ON_ERROR_STOP=1 -t -A -c "select 'analyze ' || n.nspname || '.' || c.relname || ';' from pg_class c join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'tpcds_testing'" | psql -d $DBNAME -v ON_ERROR_STOP=1 -t -A -e
 
-psql -d $DBNAME -v ON_ERROR_STOP=1 -F $'\t' -A -P pager=off -f $PWD/detailed_report.sql
+psql -d $DBNAME -v ON_ERROR_STOP=1 -P pager=off -P format=aligned -P border=1 -f $PWD/detailed_report.sql
 echo ""
 
 end_step $step
