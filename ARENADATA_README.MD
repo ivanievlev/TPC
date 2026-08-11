@@ -5,7 +5,7 @@
 - Changed compression options from quicklz to zstd
 - Added new parameters
 - Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
-- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN`, `DUCKDB_THREADS_FOR_POSTGRES_SCAN`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`
+- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN`, `DUCKDB_THREADS_FOR_POSTGRES_SCAN`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`, `SKIP_QUERIES_LIST`
 
 ## Installation
 
@@ -75,6 +75,13 @@ A timestamped copy of `tpcds.log` is also saved under `log/`:
 - EXCLUDE_HEAVY_QUERIES="true"
 
 	``It is used to run only 51 simplified out of 99 queries to make test shorter. Specify true to exclude heavy queries.``
+
+- SKIP_QUERIES_LIST=""
+
+	``Comma-separated TPC-DS query numbers (1..99) to skip in steps 05 (single-user) and 07 (multi-user).
+	Default empty: run all queries (subject to EXCLUDE_HEAVY_QUERIES).
+	Examples: SKIP_QUERIES_LIST="85" or SKIP_QUERIES_LIST="1,64,85".
+	Invalid values fail at startup: out-of-range (e.g. 164) or non-integer (e.g. n4).``
 
 - EXTRA_TPCDS_SCHEMAS="0"
 

@@ -82,6 +82,11 @@ check_variables()
                 echo "EXCLUDE_HEAVY_QUERIES=\"false\"" >> $MYVAR
                 new_variable=$(($new_variable + 1))
         fi
+	local count=$(grep "SKIP_QUERIES_LIST" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "SKIP_QUERIES_LIST=\"\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
         local count=$(grep "EXTRA_TPCDS_SCHEMAS" $MYVAR | wc -l)
         if [ "$count" -eq "0" ]; then
                 echo "EXTRA_TPCDS_SCHEMAS=\"0\"" >> $MYVAR
@@ -322,6 +327,33 @@ check_variables()
 	echo "############################################################################"
 	echo ""
 	source $MYVAR
+	if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
+		SKIP_QUERIES_LIST=""
+	fi
+	# Inline validation (tpcds.sh does not source functions.sh — avoid clobbering ADMIN_USER).
+	_skip_list=$(echo "${SKIP_QUERIES_LIST}" | tr -d '[:space:]')
+	if [ -n "$_skip_list" ]; then
+		IFS=',' read -ra _skip_items <<< "$_skip_list"
+		for _item in "${_skip_items[@]}"; do
+			if [ -z "$_item" ]; then
+				echo "ERROR: SKIP_QUERIES_LIST has an empty entry (got: ${SKIP_QUERIES_LIST})"
+				echo "Expected comma-separated query numbers in 1..99, e.g. \"85\" or \"1,64,85\"."
+				exit 1
+			fi
+			if ! [[ "$_item" =~ ^[0-9]+$ ]]; then
+				echo "ERROR: SKIP_QUERIES_LIST invalid entry \"$_item\" (must be an integer 1..99)."
+				echo "Example: SKIP_QUERIES_LIST=\"85\" or SKIP_QUERIES_LIST=\"1,64,85\"."
+				exit 1
+			fi
+			_n=$((10#$_item))
+			if [ "$_n" -lt 1 ] || [ "$_n" -gt 99 ]; then
+				echo "ERROR: SKIP_QUERIES_LIST query $_n is out of range (must be 1..99)."
+				echo "Example: SKIP_QUERIES_LIST=\"85\" or SKIP_QUERIES_LIST=\"1,64,85\"."
+				exit 1
+			fi
+		done
+	fi
+	unset _skip_list _skip_items _item _n
 }
 
 check_user()
@@ -495,6 +527,7 @@ echo_variables()
 	echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
 	echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"
 	echo "EXCLUDE_HEAVY_QUERIES: $EXCLUDE_HEAVY_QUERIES"
+	echo "SKIP_QUERIES_LIST: $SKIP_QUERIES_LIST"
         echo "EXTRA_TPCDS_SCHEMAS: $EXTRA_TPCDS_SCHEMAS"
 	echo "TRUNCATE_BEFORE_LOAD: $TRUNCATE_BEFORE_LOAD"
 	echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
@@ -709,7 +742,7 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN"
+su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
 
 # Final marker for tpcds.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).

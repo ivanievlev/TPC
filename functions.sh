@@ -60,6 +60,64 @@ source_bashrc()
 		fi
 	fi
 }
+
+# Validate SKIP_QUERIES_LIST: empty or comma-separated integers in 1..99.
+# Examples OK: "", "85", "1,64,85". Bad: "164,85", "n4".
+validate_skip_queries_list()
+{
+	local list="${1:-}"
+	local item n
+	list=$(echo "$list" | tr -d '[:space:]')
+	if [ -z "$list" ]; then
+		return 0
+	fi
+	IFS=',' read -ra _skip_items <<< "$list"
+	for item in "${_skip_items[@]}"; do
+		if [ -z "$item" ]; then
+			echo "ERROR: SKIP_QUERIES_LIST has an empty entry (got: ${1})"
+			echo "Expected comma-separated query numbers in 1..99, e.g. \"85\" or \"1,64,85\"."
+			exit 1
+		fi
+		if ! [[ "$item" =~ ^[0-9]+$ ]]; then
+			echo "ERROR: SKIP_QUERIES_LIST invalid entry \"$item\" (must be an integer 1..99)."
+			echo "Example: SKIP_QUERIES_LIST=\"85\" or SKIP_QUERIES_LIST=\"1,64,85\"."
+			exit 1
+		fi
+		# Force decimal (avoid octal for 08/09); strip leading zeros.
+		n=$((10#$item))
+		if [ "$n" -lt 1 ] || [ "$n" -gt 99 ]; then
+			echo "ERROR: SKIP_QUERIES_LIST query $n is out of range (must be 1..99)."
+			echo "Example: SKIP_QUERIES_LIST=\"85\" or SKIP_QUERIES_LIST=\"1,64,85\"."
+			exit 1
+		fi
+	done
+}
+
+# Return 0 if TPC-DS query number $1 is listed in SKIP_QUERIES_LIST ($2 optional override).
+# $1 may be zero-padded (e.g. "01", "85").
+should_skip_tpcds_query()
+{
+	local qnum="$1"
+	local list="${2:-${SKIP_QUERIES_LIST:-}}"
+	local item n q
+	list=$(echo "$list" | tr -d '[:space:]')
+	[ -z "$list" ] && return 1
+	if ! [[ "$qnum" =~ ^[0-9]+$ ]]; then
+		return 1
+	fi
+	q=$((10#$qnum))
+	IFS=',' read -ra _skip_items <<< "$list"
+	for item in "${_skip_items[@]}"; do
+		[ -z "$item" ] && continue
+		[[ "$item" =~ ^[0-9]+$ ]] || continue
+		n=$((10#$item))
+		if [ "$n" -eq "$q" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
 get_version()
 {
 	#need to call source_bashrc first

@@ -17,6 +17,7 @@ DUCKDB_MEMORY_LIMIT=$9
 DUCKDB_THREADS=${10}
 DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${11}
 DUCKDB_THREADS_FOR_POSTGRES_SCAN=${12}
+SKIP_QUERIES_LIST=${13}
 
 if [[ "$GEN_DATA_SCALE" == "" || "$session_id" == "" || "$EXPLAIN_ANALYZE" == "" ]]; then
 	echo "Error: you must provide the scale, the session id, and true/false to run explain analyze as parameters."
@@ -42,8 +43,12 @@ fi
 if [ -z "$DUCKDB_THREADS_FOR_POSTGRES_SCAN" ]; then
 	DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
 fi
+if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
+	SKIP_QUERIES_LIST=""
+fi
 
 source_bashrc
+validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
 step=testing_$session_id
 
@@ -121,6 +126,10 @@ tuples="0"
 for i in $(ls $sql_dir/*.sql); do
 	id=$i
         qnum=`echo $i | awk -F '.' '{print $3}'`
+	if should_skip_tpcds_query "$qnum"; then
+		echo "Skipping $qnum due to SKIP_QUERIES_LIST=${SKIP_QUERIES_LIST}."
+		continue
+	fi
         if [ "$EXCLUDE_HEAVY_QUERIES" == "true" ]; then
 
                 if [[

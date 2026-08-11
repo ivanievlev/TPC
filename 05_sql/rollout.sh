@@ -27,6 +27,7 @@ DUCKDB_MEMORY_LIMIT=${35}
 DUCKDB_THREADS=${36}
 DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${37}
 DUCKDB_THREADS_FOR_POSTGRES_SCAN=${38}
+SKIP_QUERIES_LIST=${39}
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
 	echo "You must provide the scale as a parameter in terms of Gigabytes, true/false to run queries with EXPLAIN ANALYZE option, true/false to use random distrbution, multi-user count, and the number of sql iterations."
@@ -51,6 +52,10 @@ fi
 if [ -z "$DUCKDB_THREADS_FOR_POSTGRES_SCAN" ]; then
 	DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
 fi
+if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
+	SKIP_QUERIES_LIST=""
+fi
+validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
 step=sql
 init_log $step
@@ -62,6 +67,7 @@ echo "DUCKDB_MEMORY_LIMIT = $DUCKDB_MEMORY_LIMIT"
 echo "DUCKDB_THREADS = $DUCKDB_THREADS"
 echo "DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN = $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN"
 echo "DUCKDB_THREADS_FOR_POSTGRES_SCAN = $DUCKDB_THREADS_FOR_POSTGRES_SCAN"
+echo "SKIP_QUERIES_LIST = $SKIP_QUERIES_LIST"
 echo "USE_EXTERNAL_FORMAT = $USE_EXTERNAL_FORMAT"
 if [ "$SQL_ON_ERROR_STOP" == "true" ]; then
 	ON_ERROR_STOP=1
@@ -92,6 +98,10 @@ fi
 rm -f $PWD/../log/*single.explain_analyze.log
 for i in $(ls $PWD/*.tpcds.*.sql); do
 	qnum=`echo $i | awk -F '.' '{print $3}'`
+	if should_skip_tpcds_query "$qnum"; then
+		echo "Skipping $qnum due to SKIP_QUERIES_LIST=${SKIP_QUERIES_LIST}."
+		continue
+	fi
 	if [ "$EXCLUDE_HEAVY_QUERIES" == "true" ]; then
 
 		if [[ 
