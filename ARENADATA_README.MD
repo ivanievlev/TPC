@@ -35,10 +35,12 @@ A timestamped copy of `tpcds.log` is also saved under `log/archived_results/`:
 `tpcds_SF<scale>_<format>[_with-duckdb]_<YYYYMMDD_HHMMSS>.log`
 (`format` is `heap`, or `parquet`/`csv`/`json`; `_with-duckdb` only when `RUN_SQL_WITH_DUCKDB=true`).
 
-Multi-user step logs go into subdirectories of `log/`:
+Step logs go into subdirectories of `log/`:
 - `log/end_testing_log/end_testing_*.log`
 - `log/rollout_testing_log/rollout_testing_*.log`
 - `log/testing_session_log/testing_session_*.log`
+- `log/single_explain_analyze_log/*sql.single.explain_analyze*.log`
+- `log/multi_explain_analyze_log/*sql.multi.explain_analyze*.log`
 
 ```
 

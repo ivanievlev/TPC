@@ -95,7 +95,8 @@ if [[ "$VERSION" == *"gpdb"* ]]; then
   gpconfig -s optimizer
 fi
 
-rm -f $PWD/../log/*single.explain_analyze.log
+mkdir -p $PWD/../log/single_explain_analyze_log
+rm -f $PWD/../log/single_explain_analyze_log/*single.explain_analyze*.log
 for i in $(ls $PWD/*.tpcds.*.sql); do
 	qnum=`echo $i | awk -F '.' '{print $3}'`
 	if should_skip_tpcds_query "$qnum"; then
@@ -179,7 +180,7 @@ for i in $(ls $PWD/*.tpcds.*.sql); do
 			tuples=$(wc -l < "$sql_outfile" | tr -d ' ')
 		else
 			myfilename=$(basename $i)
-			mylogfile=$PWD/../log/$myfilename.single.explain_analyze.log
+			mylogfile=$PWD/../log/single_explain_analyze_log/$myfilename.single.explain_analyze.log
 			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
 			set +e
 			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i >"$mylogfile" 2>"$sql_errfile"
