@@ -189,7 +189,7 @@ for i in $(ls $PWD/*.tpcds.*.sql); do
 			if [ -s "$sql_errfile" ]; then
 				cat "$sql_errfile" >&2
 			fi
-			tuples="0"
+			tuples=$(tuples_from_explain_log "$mylogfile")
 		fi
 		QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
 		log $tuples

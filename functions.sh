@@ -278,6 +278,55 @@ log()
 	fi
 }
 
+# Result tuple count from an EXPLAIN ANALYZE log (stdout of psql -f with EXPLAIN ANALYZE).
+# EXPLAIN does not return result rows to the client, so we parse the plan instead.
+tuples_from_explain_log()
+{
+	local f=$1
+	local total=0
+	local n
+
+	if [ ! -f "$f" ] || [ ! -s "$f" ]; then
+		echo 0
+		return
+	fi
+
+	if grep -q 'DuckDB Execution Plan' "$f" 2>/dev/null; then
+		# DuckDB ascii plan: under each EXPLAIN_ANALYZE node the 1st "N rows" is the
+		# meta node (always 0); the 2nd is the root operator's returned rows.
+		# Match EXPLAIN_ANALYZE (underscore) so the "EXPLAIN ANALYZE <sql>" dump is ignored.
+		while IFS= read -r n; do
+			total=$((total + n))
+		done < <(
+			awk '
+				/EXPLAIN_ANALYZE/ { in_ea=1; ea_rows=0; next }
+				in_ea && /[0-9][0-9,]*[[:space:]]+rows?/ {
+					line=$0
+					gsub(/,/, "", line)
+					if (match(line, /[0-9]+[[:space:]]+rows?/)) {
+						n = substr(line, RSTART, RLENGTH)
+						gsub(/[^0-9]/, "", n)
+						ea_rows++
+						if (ea_rows == 2) { print n+0; in_ea=0 }
+					}
+				}
+			' "$f"
+		)
+		echo "$total"
+		return
+	fi
+
+	# Native Postgres/GPDB: sum top-level "actual ... rows=N" (unindented plan roots).
+	while IFS= read -r n; do
+		total=$((total + n))
+	done < <(
+		grep -E '^[^[:space:]].*\(actual time=[^)]*rows=[0-9]+' "$f" \
+			| grep -oE 'rows=[0-9]+' \
+			| cut -d= -f2
+	)
+	echo "$total"
+}
+
 # Classify SQL run from psql stderr + exit code → query_status for reports.
 sql_query_status()
 {
