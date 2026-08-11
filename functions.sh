@@ -269,7 +269,7 @@ log()
 	# Prefer path from init_log; fall back to log/ for callers that set logfile only.
 	local out_file="${STEP_ROLLOUT_LOGFILE:-$LOCAL_PWD/log/$logfile}"
 
-	# Optional 6th field for single-user SQL reports (see sql_query_status / QUERY_STATUS).
+	# Optional 6th field for SQL reports (see sql_query_status / QUERY_STATUS).
 	if [ -n "${QUERY_STATUS:-}" ]; then
 		qs=$(printf '%s' "$QUERY_STATUS" | tr '|\n\r\t' '    ' | sed 's/  */ /g' | head -c 500)
 		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d|%s\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" "$qs" | tee -a "$out_file"
@@ -278,7 +278,7 @@ log()
 	fi
 }
 
-# Classify single-user SQL run from psql stderr + exit code → query_status for reports.
+# Classify SQL run from psql stderr + exit code → query_status for reports.
 sql_query_status()
 {
 	local errfile=$1

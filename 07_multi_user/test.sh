@@ -190,21 +190,42 @@ for i in $(ls $sql_dir/*.sql); do
 	start_log
 	schema_name=$session_id
 	table_name=$(basename $i | awk -F '.' '{print $3}')
+	sql_outfile=$(mktemp)
+	sql_errfile=$(mktemp)
+	psql_rc=0
 
 	if [ "$EXPLAIN_ANALYZE" == "false" ]; then
 		echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
-		tuples=$(psql -d $DBNAME -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i | wc -l; exit ${PIPESTATUS[0]})
-		tuples=$(($tuples-1))
+		set +e
+		psql -d $DBNAME -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i >"$sql_outfile" 2>"$sql_errfile"
+		psql_rc=$?
+		set -e
+		if [ -s "$sql_errfile" ]; then
+			cat "$sql_errfile" >&2
+		fi
+		tuples=$(wc -l < "$sql_outfile" | tr -d ' ')
+		# remove the extra line that \timing adds (legacy behaviour)
+		if [ "$tuples" -gt 0 ]; then
+			tuples=$((tuples - 1))
+		fi
 	else
 		myfilename=$(basename $i)
 		mylogfile=$PWD/../log/multi_explain_analyze_log/"$session_id"".""$myfilename"".multi.explain_analyze.log"
 		echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i"
-		psql -d $DBNAME -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i > $mylogfile
+		set +e
+		psql -d $DBNAME -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i >"$mylogfile" 2>"$sql_errfile"
+		psql_rc=$?
+		set -e
+		if [ -s "$sql_errfile" ]; then
+			cat "$sql_errfile" >&2
+		fi
 		tuples="0"
 	fi
-		
-	#remove the extra line that \timing adds
+
+	QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
 	log $tuples
+	unset QUERY_STATUS
+	rm -f "$sql_outfile" "$sql_errfile"
 done
 
 end_step $step

@@ -8,9 +8,18 @@ SELECT query_id,
        round(sum(session_7)::numeric, 3) AS session_7,
        round(sum(session_8)::numeric, 3) AS session_8,
        round(sum(session_9)::numeric, 3) AS session_9,
-       round(sum(session_10)::numeric, 3) AS session_10
+       round(sum(session_10)::numeric, 3) AS session_10,
+       (array_agg(query_status ORDER BY
+          CASE
+            WHEN query_status LIKE 'ERROR:%' THEN 0
+            WHEN query_status = 'cancelled due to timeout' THEN 1
+            ELSE 2
+          END,
+          timing DESC))[1] AS query_status
 FROM (
 	SELECT split_part(description, '.', 2) AS query_id,
+	timing,
+	query_status,
 	CASE WHEN split_part(description, '.', 1) = '1' THEN extract('epoch' from duration) ELSE 0 END AS session_1,
 	CASE WHEN split_part(description, '.', 1) = '2' THEN extract('epoch' from duration) ELSE 0 END AS session_2,
 	CASE WHEN split_part(description, '.', 1) = '3' THEN extract('epoch' from duration) ELSE 0 END AS session_3,
