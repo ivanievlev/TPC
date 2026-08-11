@@ -68,15 +68,19 @@ get_psql_count()
 
 get_file_count()
 {
-	file_count=$(ls $PWD/../log/end_testing* 2> /dev/null | wc -l)
+	file_count=$(ls $PWD/../log/end_testing_log/end_testing*.log 2> /dev/null | wc -l)
 }
 
 get_file_count
 if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 
-	rm -f $PWD/../log/end_testing_*.log
-	rm -f $PWD/../log/testing*.log
-	rm -f $PWD/../log/rollout_testing_*.log
+	mkdir -p \
+		$PWD/../log/end_testing_log \
+		$PWD/../log/rollout_testing_log \
+		$PWD/../log/testing_session_log
+	rm -f $PWD/../log/end_testing_log/end_testing_*.log
+	rm -f $PWD/../log/testing_session_log/testing_session_*.log
+	rm -f $PWD/../log/rollout_testing_log/rollout_testing_*.log
 	rm -f $PWD/../log/*multi.explain_analyze.log
 
 	rm -f $PWD/query_*.sql
@@ -116,7 +120,7 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 	done
 
 	for x in $(seq 1 $MULTI_USER_COUNT); do
-		session_log=$PWD/../log/testing_session_$x.log
+		session_log=$PWD/../log/testing_session_log/testing_session_$x.log
 		echo "$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
 		$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST" |& tee $session_log &
 	done

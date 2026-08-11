@@ -161,9 +161,40 @@ format_duration()
 	printf "%02d:%02d:%02d.%03d" "$((s/3600%24))" "$((s/60%60))" "$((s%60))" "$m"
 }
 
+# Ensure standard log/ layout exists.
+ensure_log_dirs()
+{
+	mkdir -p \
+		"$LOCAL_PWD/log" \
+		"$LOCAL_PWD/log/end_testing_log" \
+		"$LOCAL_PWD/log/rollout_testing_log" \
+		"$LOCAL_PWD/log/testing_session_log" \
+		"$LOCAL_PWD/log/archived_results"
+}
+
+# Resolve directories for end_*.log / rollout_*.log of a step.
+# testing_* → log/end_testing_log and log/rollout_testing_log; others → log/.
+resolve_step_log_dirs()
+{
+	local step=$1
+	ensure_log_dirs
+	case "$step" in
+		testing_*)
+			STEP_END_LOG_DIR="$LOCAL_PWD/log/end_testing_log"
+			STEP_ROLLOUT_LOG_DIR="$LOCAL_PWD/log/rollout_testing_log"
+			;;
+		*)
+			STEP_END_LOG_DIR="$LOCAL_PWD/log"
+			STEP_ROLLOUT_LOG_DIR="$LOCAL_PWD/log"
+			;;
+	esac
+}
+
 init_log()
 {
-	if [ -f $LOCAL_PWD/log/end_$1.log ]; then
+	resolve_step_log_dirs "$1"
+
+	if [ -f "$STEP_END_LOG_DIR/end_$1.log" ]; then
 		echo "We are skipping step $1"
 		exit 0
 	else
@@ -171,9 +202,10 @@ init_log()
 	fi
 
 	logfile=rollout_$1.log
+	STEP_ROLLOUT_LOGFILE="$STEP_ROLLOUT_LOG_DIR/$logfile"
 
 	#A bug when process expects rollout_sql.log occures and I replaced rm for empty 
-	> $LOCAL_PWD/log/$logfile
+	> "$STEP_ROLLOUT_LOGFILE"
 	#rm -f $LOCAL_PWD/log/$logfile
 
 	# wall-clock старта шага (не путать с T из start_log/log по объектам)
@@ -232,12 +264,15 @@ log()
 		tuples="0"
 	fi
 
+	# Prefer path from init_log; fall back to log/ for callers that set logfile only.
+	local out_file="${STEP_ROLLOUT_LOGFILE:-$LOCAL_PWD/log/$logfile}"
+
 	# Optional 6th field for single-user SQL reports (see sql_query_status / QUERY_STATUS).
 	if [ -n "${QUERY_STATUS:-}" ]; then
 		qs=$(printf '%s' "$QUERY_STATUS" | tr '|\n\r\t' '    ' | sed 's/  */ /g' | head -c 500)
-		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d|%s\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" "$qs" | tee -a  $LOCAL_PWD/log/$logfile
+		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d|%s\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" "$qs" | tee -a "$out_file"
 	else
-		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" | tee -a  $LOCAL_PWD/log/$logfile
+		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" | tee -a "$out_file"
 	fi
 }
 
@@ -279,8 +314,10 @@ sql_query_status()
 end_step()
 {
 	local step=$1
-	local end_file=$LOCAL_PWD/log/end_$step.log
-	local end_ts elapsed duration
+	local end_file end_ts elapsed duration
+
+	resolve_step_log_dirs "$step"
+	end_file="$STEP_END_LOG_DIR/end_$step.log"
 
 	end_ts=$(date +%F_%T)
 	if [ -n "${STEP_START_NS:-}" ]; then

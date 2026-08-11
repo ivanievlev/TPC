@@ -31,9 +31,14 @@ tail -f tpcds.log
 When the run finishes successfully, the last line is:
 The end. All TPC-DS steps completed
 
-A timestamped copy of `tpcds.log` is also saved under `log/`:
+A timestamped copy of `tpcds.log` is also saved under `log/archived_results/`:
 `tpcds_SF<scale>_<format>[_with-duckdb]_<YYYYMMDD_HHMMSS>.log`
 (`format` is `heap`, or `parquet`/`csv`/`json`; `_with-duckdb` only when `RUN_SQL_WITH_DUCKDB=true`).
+
+Multi-user step logs go into subdirectories of `log/`:
+- `log/end_testing_log/end_testing_*.log`
+- `log/rollout_testing_log/rollout_testing_*.log`
+- `log/testing_session_log/testing_session_*.log`
 
 ```
 
@@ -63,7 +68,7 @@ A timestamped copy of `tpcds.log` is also saved under `log/`:
 	``Each RUN_*=false skips that step entirely in rollout.sh (the step script is not called).
 	RUN_*=true removes the step's end_*.log and runs it. RUN_MULTI_USER and RUN_MULTI_USER_REPORT
 	are independent: with MULTI_USER=false and MULTI_USER_REPORT=true the report still runs on
-	whatever is already in log/rollout_testing_*.log.``
+	whatever is already in log/rollout_testing_log/rollout_testing_*.log.``
 
 ## New Arenadata parameters
 

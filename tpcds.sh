@@ -702,7 +702,7 @@ archive_tpcds_log()
 		duck_suffix="_with-duckdb"
 	fi
 
-	log_dir="$INSTALL_DIR/$REPO/log"
+	log_dir="$INSTALL_DIR/$REPO/log/archived_results"
 	mkdir -p "$log_dir"
 	ts=$(date +%Y%m%d_%H%M%S)
 	dest="$log_dir/tpcds_SF${GEN_DATA_SCALE}_${format}${duck_suffix}_${ts}.log"
@@ -749,6 +749,6 @@ su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $E
 echo ""
 echo "The end. All TPC-DS steps completed"
 
-# Keep rewriting tpcds.log each run; also archive a timestamped copy under log/.
+# Keep rewriting tpcds.log each run; also archive a timestamped copy under log/archived_results/.
 archive_tpcds_log
 
