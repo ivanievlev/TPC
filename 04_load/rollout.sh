@@ -121,6 +121,26 @@ if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] 
 	exit 0
 fi
 
+# Heap load expects real tables. A prior parquet/csv/json DDL leaves VIEWs, and
+# TRUNCATE/COPY then fail with '"time_dim" is not a table'.
+heap_relkind=$(psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -A -t -c \
+	"SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'tpcds' AND c.relname = 'time_dim'" \
+	|| true)
+if [ "$heap_relkind" = "v" ]; then
+	echo "ERROR: tpcds.time_dim is a VIEW (left from a previous USE_EXTERNAL_FORMAT=parquet|csv|json run),"
+	echo "       but USE_EXTERNAL_FORMAT=false expects heap TABLES for TRUNCATE/COPY."
+	echo "       Set RUN_DDL=true (and keep USE_EXTERNAL_FORMAT=false) to recreate heap tables, then re-run load."
+	exit 1
+fi
+if [ -z "$heap_relkind" ]; then
+	echo "ERROR: tpcds.time_dim does not exist. Set RUN_DDL=true to create heap tables before load."
+	exit 1
+fi
+if [ "$heap_relkind" != "r" ] && [ "$heap_relkind" != "p" ]; then
+	echo "ERROR: tpcds.time_dim has unexpected relkind='$heap_relkind' (need ordinary/partitioned table)."
+	exit 1
+fi
+
 if [ "$TRUNCATE_BEFORE_LOAD" == "true" ]; then
 	echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -f 000.truncate.sql"
 	psql -d $DBNAME -v ON_ERROR_STOP=1 -f $PWD/000.truncate.sql
