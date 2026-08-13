@@ -1,3 +1,20 @@
+# Unified TPC harness (TPC-DS + TPC-H)
+
+`REPO="TPC"` / `REPO_URL="https://github.com/ivanievlev/TPC"`
+
+Select the benchmark with:
+
+```bash
+TPC_MODE="TPC-DS"   # default — tpcds/00_compile_tpcds … tpcds/09_score
+TPC_MODE="TPC-H"    # tpch/00_compile_tpch … tpch/09_score
+```
+
+Shared knobs in `tpcds_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, …) apply to **both** modes. Entry points: `./tpcds.sh` or `./tpc.sh`.
+
+TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H.
+
+---
+
 # Arenadata version of TPC-DS
 ## Changes:
 

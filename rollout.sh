@@ -3,6 +3,7 @@
 set -e
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/functions.sh
+source $PWD/mode.sh
 source_bashrc
 
 GEN_DATA_SCALE="$1"
@@ -54,10 +55,12 @@ DUCKDB_THREADS="${46}"
 DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="${47}"
 DUCKDB_THREADS_FOR_POSTGRES_SCAN="${48}"
 SKIP_QUERIES_LIST="${49}"
+TPC_MODE="${50:-TPC-DS}"
 
+init_tpc_mode
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPCDS" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SQL" == "" || "$RUN_SINGLE_USER_REPORT" == "" || "$RUN_MULTI_USER" == "" || "$RUN_MULTI_USER_REPORT" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
-	echo "Please run this script from tpcds.sh so the correct parameters are passed to it."
+	echo "Please run this script from tpcds.sh / tpc.sh so the correct parameters are passed to it."
 	exit 1
 fi
 if [ -z "$STATEMENT_TIMEOUT" ]; then
@@ -115,13 +118,9 @@ case "$USE_EXTERNAL_FORMAT" in
 			echo "${USE_EXTERNAL_FORMAT} files can't be processed without DuckDB. Change format or activate DuckDB"
 			exit 1
 		fi
-		# DuckDB: COPY cannot combine FILE_SIZE_BYTES and PARTITION_BY (hive).
 		if [ "$EXTERNAL_HIVE_PARTITIONING" = "true" ] && \
 			[ "${EXTERNAL_FILE_SIZE_BYTES}" != "-1" ] && [ -n "${EXTERNAL_FILE_SIZE_BYTES}" ]; then
 			echo "ERROR: EXTERNAL_HIVE_PARTITIONING=true and EXTERNAL_FILE_SIZE_BYTES (${EXTERNAL_FILE_SIZE_BYTES}) are incompatible."
-			echo "DuckDB cannot combine PARTITION_BY and FILE_SIZE_BYTES in COPY. Keep only one of the two:"
-			echo "  - hive: EXTERNAL_HIVE_PARTITIONING=\"true\" and EXTERNAL_FILE_SIZE_BYTES=\"-1\""
-			echo "  - sized files: EXTERNAL_HIVE_PARTITIONING=\"false\" and EXTERNAL_FILE_SIZE_BYTES=<size>"
 			exit 1
 		fi
 		;;
@@ -140,7 +139,6 @@ if [ "$RUN_SQL_WITH_DUCKDB" = "true" ]; then
 	duckdb_available=$(psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -t -A -c "SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_duckdb';" 2>/dev/null || echo "0")
 	if [ "$duckdb_available" != "1" ]; then
 		echo "ERROR: RUN_SQL_WITH_DUCKDB=true but extension pg_duckdb is not available in database $DBNAME."
-		echo "Install pg_duckdb on the PostgreSQL server and ensure it appears in pg_available_extensions."
 		exit 1
 	fi
 	if ! psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "CREATE EXTENSION IF NOT EXISTS pg_duckdb;"; then
@@ -149,8 +147,6 @@ if [ "$RUN_SQL_WITH_DUCKDB" = "true" ]; then
 	fi
 	echo "pg_duckdb extension is available and installed."
 fi
-
-QUIET=$5
 
 create_directories()
 {
@@ -162,15 +158,16 @@ create_directories()
 
 create_directories
 echo "############################################################################"
-echo "TPC-DS Script for Pivotal Greenplum Database."
+echo "${TPC_BENCH_LABEL} Script (unified TPC harness)."
 echo "############################################################################"
 echo ""
 echo "############################################################################"
+echo "TPC_MODE: $TPC_MODE"
 echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
 echo "EXPLAIN_ANALYZE: $EXPLAIN_ANALYZE"
 echo "RANDOM_DISTRIBUTION: $RANDOM_DISTRIBUTION"
 echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
-echo "RUN_COMPILE_TPCDS: $RUN_COMPILE_TPCDS"
+echo "RUN_COMPILE_TPCDS: $RUN_COMPILE_TPCDS  (compile step for current TPC_MODE)"
 echo "RUN_GEN_DATA: $RUN_GEN_DATA"
 echo "RUN_INIT: $RUN_INIT"
 echo "RUN_DDL: $RUN_DDL"
@@ -180,6 +177,7 @@ echo "SINGLE_USER_ITERATIONS: $SINGLE_USER_ITERATIONS"
 echo "RUN_SINGLE_USER_REPORT: $RUN_SINGLE_USER_REPORT"
 echo "RUN_MULTI_USER: $RUN_MULTI_USER"
 echo "RUN_MULTI_USER_REPORT: $RUN_MULTI_USER_REPORT"
+echo "RUN_SCORE: $RUN_SCORE"
 echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"
 echo "EXCLUDE_HEAVY_QUERIES: $EXCLUDE_HEAVY_QUERIES"
 echo "SKIP_QUERIES_LIST: $SKIP_QUERIES_LIST"
@@ -187,38 +185,17 @@ echo "EXTRA_TPCDS_SCHEMAS: $EXTRA_TPCDS_SCHEMAS"
 echo "TRUNCATE_BEFORE_LOAD: $TRUNCATE_BEFORE_LOAD"
 echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT: $STATEMENT_TIMEOUT"
-echo "net_core_rmem: $net_core_rmem"
-echo "net_core_wmem: $net_core_wmem"
-echo "rg6_memory_limit: $rg6_memory_limit"
-echo "rg6_memory_shared_quota: $rg6_memory_shared_quota"
-echo "rg6_concurrency: $rg6_concurrency"
-echo "rg6_cpu_rate_limit: $rg6_cpu_rate_limit"
-echo "rg7_cpu_hard_quota_limit: $rg7_cpu_hard_quota_limit"
-echo "DELETE_DAT_FILES_BEFORE_SQL: $DELETE_DAT_FILES_BEFORE_SQL"
-echo "RUN_SQL_FROM_ROLE: $RUN_SQL_FROM_ROLE"
-echo "REFERENCE_TABLE_TYPE: $REFERENCE_TABLE_TYPE"
-echo "DROP_CACHE_BEFORE_EACH_SINGLE_QUERY: $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY"
-echo "HEAP_ONLY: $HEAP_ONLY"
 echo "ADMIN_USER: $ADMIN_USER"
 echo "DBNAME: $DBNAME"
-echo "MAKE_PREREQUISITES: $MAKE_PREREQUISITES"
-echo "NETWORK_INTERFACE_JUMBOFRAME: $NETWORK_INTERFACE_JUMBOFRAME"
-echo "SET_ORCA_OPTIMIZER: $SET_ORCA_OPTIMIZER"
 echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
-echo "EXTERNAL_HIVE_PARTITIONING: $EXTERNAL_HIVE_PARTITIONING"
-echo "EXTERNAL_FILE_SIZE_BYTES: $EXTERNAL_FILE_SIZE_BYTES"
-echo "EXTERNAL_COMPRESSION: $EXTERNAL_COMPRESSION"
 echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
-echo "DUCKDB_MEMORY_LIMIT: $DUCKDB_MEMORY_LIMIT"
-echo "DUCKDB_THREADS: $DUCKDB_THREADS"
-echo "DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN: $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN"
-echo "DUCKDB_THREADS_FOR_POSTGRES_SCAN: $DUCKDB_THREADS_FOR_POSTGRES_SCAN"
-echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
-
 echo "############################################################################"
 echo ""
+
+# RUN_COMPILE_TPCDS gates the compile step for either mode (name kept for compatibility).
 if [ "$RUN_COMPILE_TPCDS" == "true" ]; then
 	rm -f $PWD/log/end_compile_tpcds.log
+	rm -f $PWD/log/end_compile_tpch.log
 fi
 if [ "$RUN_GEN_DATA" == "true" ]; then
 	rm -f $PWD/log/end_gen_data.log
@@ -248,15 +225,12 @@ if [ "$RUN_SCORE" == "true" ]; then
 	rm -f $PWD/log/end_score.log
 fi
 
-
-# RUN_*=false → do not invoke the step at all.
-# RUN_*=true → delete that step's end_*.log above, then run (init_log inside the step
-# still skips only if an end_*.log somehow remains).
-
 step_run_flag()
 {
-	case "$(basename "$1")" in
-		00_compile_tpcds) echo "$RUN_COMPILE_TPCDS" ;;
+	local base
+	base=$(basename "$1")
+	case "$base" in
+		00_compile_tpcds|00_compile_tpch) echo "$RUN_COMPILE_TPCDS" ;;
 		01_gen_data) echo "$RUN_GEN_DATA" ;;
 		02_init) echo "$RUN_INIT" ;;
 		03_ddl) echo "$RUN_DDL" ;;
@@ -270,12 +244,16 @@ step_run_flag()
 	esac
 }
 
-for i in $(ls -d $PWD/0*); do
+STEP_ARGS="$GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $REFERENCE_TABLE_TYPE $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN"
+
+while IFS= read -r i; do
+	[ -z "$i" ] && continue
+	[ -d "$i" ] || continue
 	run_flag=$(step_run_flag "$i")
 	if [ "$run_flag" != "true" ]; then
 		echo "Skipping $i (corresponding RUN_*=false)"
 		continue
 	fi
 	echo "$i/rollout.sh"
-	$i/rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $REFERENCE_TABLE_TYPE $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST"
-done
+	$i/rollout.sh $STEP_ARGS "$SKIP_QUERIES_LIST"
+done < <(tpc_step_dirs "$PWD")

@@ -19,17 +19,22 @@ check_variables()
 	fi
 	local count=$(grep "REPO=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "REPO=\"TPC-DS\"" >> $MYVAR
+		echo "REPO=\"TPC\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "REPO_URL=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "REPO_URL=\"https://github.com/ivanievlev/TPC-DS\"" >> $MYVAR
+		echo "REPO_URL=\"https://github.com/ivanievlev/TPC\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "REPO_BRANCH=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
 		echo "REPO_BRANCH=\"master\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "TPC_MODE=" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "TPC_MODE=\"TPC-DS\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "ADMIN_USER=" $MYVAR | wc -l)
@@ -326,6 +331,13 @@ check_variables()
 	echo "Sourcing $MYVAR"
 	echo "############################################################################"
 	echo ""
+	# Migrate legacy clone identity from the old TPC-DS repository name.
+	if grep -q '^REPO="TPC-DS"' "$MYVAR" 2>/dev/null; then
+		sed -i 's/^REPO="TPC-DS"/REPO="TPC"/' "$MYVAR"
+	fi
+	if grep -q '^REPO_URL="https://github.com/ivanievlev/TPC-DS"' "$MYVAR" 2>/dev/null; then
+		sed -i 's|^REPO_URL="https://github.com/ivanievlev/TPC-DS"|REPO_URL="https://github.com/ivanievlev/TPC"|' "$MYVAR"
+	fi
 	source $MYVAR
 	if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
 		SKIP_QUERIES_LIST=""
@@ -591,29 +603,34 @@ _tpcds_kill_tree()
 	fi
 }
 
-# Stop leftover TPC-DS runs (previous tpcds.sh / rollout / test.sh / dsqgen / psql -f .../TPC-DS).
-# Does not touch the current tpcds.sh ($$) or its ancestors. Called before this run starts rollout.
+# Stop leftover TPC runs (previous tpcds.sh / tpc.sh / rollout / test.sh / dsqgen / dbgen / qgen).
+# Does not touch the current entry script ($$) or its ancestors. Called before this run starts rollout.
 kill_previous_processes()
 {
 	local repo self pid candidates
 	local found=0
 
 	if [ "${KILL_PREVIOUS_PROCESSES:-true}" != "true" ]; then
-		echo "KILL_PREVIOUS_PROCESSES=false: leaving existing TPC-DS processes alone"
+		echo "KILL_PREVIOUS_PROCESSES=false: leaving existing TPC processes alone"
 		return 0
 	fi
 
 	self=$$
 	repo="${INSTALL_DIR}/${REPO}"
-	echo "KILL_PREVIOUS_PROCESSES=true: searching for leftover TPC-DS processes (excluding pid $self)..."
+	echo "KILL_PREVIOUS_PROCESSES=true: searching for leftover TPC processes (excluding pid $self)..."
 
 	candidates=$(
 		{
 			pgrep -f "${repo}/tpcds\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/tpc\\.sh" 2>/dev/null || true
 			pgrep -f "${repo}/rollout\\.sh" 2>/dev/null || true
-			pgrep -f "${repo}/[0-9][^ ]*/rollout\\.sh" 2>/dev/null || true
-			pgrep -f "${repo}/07_multi_user/test\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/tpcds/[0-9][^ ]*/rollout\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/tpch/[0-9][^ ]*/rollout\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/tpcds/07_multi_user/test\\.sh" 2>/dev/null || true
+			pgrep -f "${repo}/tpch/07_multi_user/test\\.sh" 2>/dev/null || true
 			pgrep -f "${repo}/[^ ]*dsqgen" 2>/dev/null || true
+			pgrep -f "${repo}/[^ ]*dbgen" 2>/dev/null || true
+			pgrep -f "${repo}/[^ ]*qgen" 2>/dev/null || true
 			pgrep -f "/tpcds\\.sh" 2>/dev/null || true
 			pgrep -f "[.]/tpcds\\.sh" 2>/dev/null || true
 			pgrep -f "psql .*-f ${repo}/" 2>/dev/null || true
@@ -630,7 +647,7 @@ kill_previous_processes()
 	done
 
 	if [ "$found" -eq 0 ]; then
-		echo "  (no leftover TPC-DS processes found)"
+		echo "  (no leftover TPC processes found)"
 		return 0
 	fi
 
@@ -645,9 +662,6 @@ kill_previous_processes()
 		fi
 	done
 
-	# Terminate leftover client backends in DBNAME (orphan queries hold locks after
-	# clients are killed; DROP SCHEMA / DDL would hang otherwise). Safe for a
-	# dedicated benchmark database — does not use kill -9 on postgres processes.
 	if command -v psql >/dev/null 2>&1 && [ -n "${DBNAME:-}" ] && [ -n "${ADMIN_USER:-}" ]; then
 		echo "Terminating leftover client backends in database $DBNAME..."
 		su -l "$ADMIN_USER" -c "psql -d \"$DBNAME\" -v ON_ERROR_STOP=0 -q -c \"
@@ -660,7 +674,7 @@ WHERE datname = current_database()
 		sleep 1
 	fi
 
-	echo "Done killing leftover TPC-DS processes."
+	echo "Done killing leftover TPC processes."
 }
 
 make_prerequisites()
@@ -693,7 +707,7 @@ archive_tpcds_log()
 {
 	local format="heap"
 	local duck_suffix=""
-	local ts dest src log_dir
+	local ts dest src log_dir prefix
 
 	case "${USE_EXTERNAL_FORMAT}" in
 		parquet|csv|json) format="$USE_EXTERNAL_FORMAT" ;;
@@ -702,16 +716,19 @@ archive_tpcds_log()
 		duck_suffix="_with-duckdb"
 	fi
 
+	prefix="${TPC_LOG_PREFIX:-tpcds}"
 	log_dir="$INSTALL_DIR/$REPO/log/archived_results"
 	mkdir -p "$log_dir"
 	ts=$(date +%Y%m%d_%H%M%S)
-	dest="$log_dir/tpcds_SF${GEN_DATA_SCALE}_${format}${duck_suffix}_${ts}.log"
+	dest="$log_dir/${prefix}_SF${GEN_DATA_SCALE}_${format}${duck_suffix}_${ts}.log"
 
 	src=""
 	if [ -f "$INSTALL_DIR/$REPO/tpcds.log" ]; then
 		src="$INSTALL_DIR/$REPO/tpcds.log"
 	elif [ -f "./tpcds.log" ]; then
 		src="./tpcds.log"
+	elif [ -f "./tpc.log" ]; then
+		src="./tpc.log"
 	fi
 
 	if [ -n "$src" ]; then
@@ -733,7 +750,11 @@ yum_installs
 # Переключает репозиторий на ветку REPO_BRANCH из tpcds_variables.sh
 repo_init
 script_check
+# Resolve TPC_MODE → schemas / step roots / log prefixes
+source "$PWD/mode.sh"
+init_tpc_mode
 echo_variables
+echo "TPC_MODE: $TPC_MODE"
 kill_previous_processes
 
 if [ "$MAKE_PREREQUISITES" == "true" ]; then
@@ -742,12 +763,12 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
+su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\""
 
 # Final marker for tpcds.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).
 echo ""
-echo "The end. All TPC-DS steps completed"
+echo "The end. All ${TPC_BENCH_LABEL} steps completed"
 
 # Keep rewriting tpcds.log each run; also archive a timestamped copy under log/archived_results/.
 archive_tpcds_log

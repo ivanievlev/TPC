@@ -61,12 +61,13 @@ source_bashrc()
 	fi
 }
 
-# Validate SKIP_QUERIES_LIST: empty or comma-separated integers in 1..99.
-# Examples OK: "", "85", "1,64,85". Bad: "164,85", "n4".
+# Validate SKIP_QUERIES_LIST: empty or comma-separated integers in 1..TPC_QUERY_ID_MAX
+# (99 for TPC-DS, 22 for TPC-H). Examples OK: "", "85", "1,64,85".
 validate_skip_queries_list()
 {
 	local list="${1:-}"
 	local item n
+	local max="${TPC_QUERY_ID_MAX:-99}"
 	list=$(echo "$list" | tr -d '[:space:]')
 	if [ -z "$list" ]; then
 		return 0
@@ -75,19 +76,17 @@ validate_skip_queries_list()
 	for item in "${_skip_items[@]}"; do
 		if [ -z "$item" ]; then
 			echo "ERROR: SKIP_QUERIES_LIST has an empty entry (got: ${1})"
-			echo "Expected comma-separated query numbers in 1..99, e.g. \"85\" or \"1,64,85\"."
+			echo "Expected comma-separated query numbers in 1..${max}."
 			exit 1
 		fi
 		if ! [[ "$item" =~ ^[0-9]+$ ]]; then
-			echo "ERROR: SKIP_QUERIES_LIST invalid entry \"$item\" (must be an integer 1..99)."
-			echo "Example: SKIP_QUERIES_LIST=\"85\" or SKIP_QUERIES_LIST=\"1,64,85\"."
+			echo "ERROR: SKIP_QUERIES_LIST invalid entry \"$item\" (must be an integer 1..${max})."
 			exit 1
 		fi
 		# Force decimal (avoid octal for 08/09); strip leading zeros.
 		n=$((10#$item))
-		if [ "$n" -lt 1 ] || [ "$n" -gt 99 ]; then
-			echo "ERROR: SKIP_QUERIES_LIST query $n is out of range (must be 1..99)."
-			echo "Example: SKIP_QUERIES_LIST=\"85\" or SKIP_QUERIES_LIST=\"1,64,85\"."
+		if [ "$n" -lt 1 ] || [ "$n" -gt "$max" ]; then
+			echo "ERROR: SKIP_QUERIES_LIST query $n is out of range (must be 1..${max} for ${TPC_MODE:-TPC-DS})."
 			exit 1
 		fi
 	done

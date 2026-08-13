@@ -1,5 +1,6 @@
 #!/bin/bash
 # Shared helpers for USE_EXTERNAL_FORMAT=parquet|csv|json (pg_duckdb / local files).
+# Uses TPC_* from mode.sh (TPC_SCHEMA, TPC_STEP_ROOT, TPC_DATA_PREFIX). Defaults = TPC-DS.
 
 external_format_enabled()
 {
@@ -9,26 +10,44 @@ external_format_enabled()
 	esac
 }
 
-external_data_root()
+external_bench_defaults()
 {
-	echo "/arenadata/tpcds_${GEN_DATA_SCALE}_${USE_EXTERNAL_FORMAT}"
+	: "${TPC_SCHEMA:=tpcds}"
+	: "${TPC_STEP_ROOT:=tpcds}"
+	: "${TPC_DATA_PREFIX:=tpcds}"
+	: "${TPC_MODE:=TPC-DS}"
 }
 
-# Remove leftover /arenadata/tpcds_*_{parquet,csv,json} trees from previous runs.
-# Called from 04_load when PURGE_OLD_EXTERNAL_DATA=true (any USE_EXTERNAL_FORMAT).
+external_ddl_dir()
+{
+	external_bench_defaults
+	echo "${LOCAL_PWD}/${TPC_STEP_ROOT}/03_ddl"
+}
+
+external_data_root()
+{
+	external_bench_defaults
+	echo "/arenadata/${TPC_DATA_PREFIX}_${GEN_DATA_SCALE}_${USE_EXTERNAL_FORMAT}"
+}
+
+# Remove leftover /arenadata/{tpcds,tpch}_*_{parquet,csv,json} trees from previous runs.
 purge_old_external_data()
 {
 	local d
 	local found=0
+	external_bench_defaults
 
 	if [ "${PURGE_OLD_EXTERNAL_DATA:-true}" != "true" ]; then
-		echo "PURGE_OLD_EXTERNAL_DATA=${PURGE_OLD_EXTERNAL_DATA:-false}: keeping existing /arenadata/tpcds_*_{parquet,csv,json}"
+		echo "PURGE_OLD_EXTERNAL_DATA=${PURGE_OLD_EXTERNAL_DATA:-false}: keeping existing /arenadata/{tpcds,tpch}_*_{parquet,csv,json}"
 		return 0
 	fi
 
-	echo "PURGE_OLD_EXTERNAL_DATA=true: removing previous external data under /arenadata/tpcds_*_{parquet,csv,json}"
+	echo "PURGE_OLD_EXTERNAL_DATA=true: removing previous external data under /arenadata/{tpcds,tpch}_*_{parquet,csv,json}"
 	shopt -s nullglob
-	for d in /arenadata/tpcds_*_parquet /arenadata/tpcds_*_csv /arenadata/tpcds_*_json; do
+	for d in \
+		/arenadata/tpcds_*_parquet /arenadata/tpcds_*_csv /arenadata/tpcds_*_json \
+		/arenadata/tpch_*_parquet /arenadata/tpch_*_csv /arenadata/tpch_*_json
+	do
 		if [ -d "$d" ] || [ -e "$d" ]; then
 			found=1
 			echo "  rm -rf $d"
@@ -94,19 +113,43 @@ external_duckdb_csv_type()
 	esac
 }
 
-# Fact tables that can be hive-partitioned by year/month via date_dim.
+# Fact / date columns for hive year/month partitioning.
+# TPC-DS: date_sk → join date_dim. TPC-H: native DATE columns → EXTRACT.
+# Prints: "<column>|<kind>" where kind is datesk|date. Empty if not hive-eligible.
+external_hive_partition_column()
+{
+	external_bench_defaults
+	case "${TPC_MODE}" in
+		TPC-H)
+			case "$1" in
+				orders) echo "o_orderdate|date" ;;
+				lineitem) echo "l_shipdate|date" ;;
+				*) echo "" ;;
+			esac
+			;;
+		*)
+			case "$1" in
+				inventory) echo "inv_date_sk|datesk" ;;
+				store_sales) echo "ss_sold_date_sk|datesk" ;;
+				store_returns) echo "sr_returned_date_sk|datesk" ;;
+				catalog_sales) echo "cs_sold_date_sk|datesk" ;;
+				catalog_returns) echo "cr_returned_date_sk|datesk" ;;
+				web_sales) echo "ws_sold_date_sk|datesk" ;;
+				web_returns) echo "wr_returned_date_sk|datesk" ;;
+				*) echo "" ;;
+			esac
+			;;
+	esac
+}
+
+# Backward-compatible: returns only the column name (or empty).
 external_hive_date_sk_column()
 {
-	case "$1" in
-		inventory) echo "inv_date_sk" ;;
-		store_sales) echo "ss_sold_date_sk" ;;
-		store_returns) echo "sr_returned_date_sk" ;;
-		catalog_sales) echo "cs_sold_date_sk" ;;
-		catalog_returns) echo "cr_returned_date_sk" ;;
-		web_sales) echo "ws_sold_date_sk" ;;
-		web_returns) echo "wr_returned_date_sk" ;;
-		*) echo "" ;;
-	esac
+	local info col
+	info=$(external_hive_partition_column "$1")
+	[ -z "$info" ] && echo "" && return
+	col=$(echo "$info" | awk -F '|' '{print $1}')
+	echo "$col"
 }
 
 external_hive_enabled()
@@ -114,6 +157,14 @@ external_hive_enabled()
 	local v
 	v=$(echo "${EXTERNAL_HIVE_PARTITIONING}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
 	[ "$v" = "true" ]
+}
+
+# True if column name should be omitted from views / COPY output (TPC-H pipe terminator).
+external_is_dummy_column()
+{
+	local n
+	n=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+	[ "$n" = "dummy" ]
 }
 
 # Parse CREATE TABLE columns from a 03_ddl/*.postgresql.<table>.sql file.
@@ -124,12 +175,37 @@ external_parse_columns()
 	awk '
 		BEGIN { in_tbl=0 }
 		/[Cc][Rr][Ee][Aa][Tt][Ee][[:space:]]+[Tt][Aa][Bb][Ll][Ee]/ { in_tbl=1; next }
-		in_tbl && /\);/ { exit }
+		in_tbl && /\);/ {
+			# last column may share the closing ");" line — still parse before exit
+			line=$0
+			sub(/\);.*/, "", line)
+			gsub(/^[ \t]+|[ \t]+$/, "", line)
+			gsub(/^[(]+/, "", line)
+			gsub(/,$/, "", line)
+			if (line != "" && line !~ /^--/) {
+				n = split(line, parts, /[[:space:]]+/)
+				if (n >= 2) {
+					name = parts[1]
+					typ = parts[2]
+					for (i = 3; i <= n; i++) {
+						if (tolower(parts[i]) == "not" && i+1 <= n && tolower(parts[i+1]) == "null") {
+							i++
+							continue
+						}
+						typ = typ " " parts[i]
+					}
+					gsub(/^[ \t]+|[ \t]+$/, "", typ)
+					print name "|" typ
+				}
+			}
+			exit
+		}
 		in_tbl {
 			line=$0
 			gsub(/^[ \t]+|[ \t]+$/, "", line)
+			gsub(/^[(]+/, "", line)
 			gsub(/,$/, "", line)
-			if (line == "" || line ~ /^\(/ || line ~ /^--/) next
+			if (line == "" || line ~ /^--/) next
 			n = split(line, parts, /[[:space:]]+/)
 			if (n < 2) next
 			name = parts[1]
@@ -164,10 +240,18 @@ external_build_copy_options()
 
 external_dat_glob()
 {
-	# Exact TPC-DS chunk name: <table>_<child>_<parallel>.dat
-	# Must NOT use <table>_*.dat — that also matches store_returns / customer_address / etc.
+	# TPC-DS: <table>_<child>_<parallel>.dat
+	# TPC-H:  <table>.tbl*
 	local table_name=$1
-	echo "${PGDATA}/arenadata_*/${table_name}_[0-9]*_[0-9]*.dat"
+	external_bench_defaults
+	case "${TPC_MODE}" in
+		TPC-H)
+			echo "${PGDATA}/arenadata_*/${table_name}.tbl*"
+			;;
+		*)
+			echo "${PGDATA}/arenadata_*/${table_name}_[0-9]*_[0-9]*.dat"
+			;;
+	esac
 }
 
 # Glob used by read_* in views.
@@ -220,7 +304,7 @@ external_build_view_from_clause()
 	esac
 }
 
-# Build SELECT list casting CSV columns to typed aliases.
+# Build SELECT list casting CSV columns to typed aliases (skips TPC-H dummy).
 external_build_typed_select()
 {
 	local ddl_file=$1
@@ -228,6 +312,9 @@ external_build_typed_select()
 	local name typ cast_t
 	while IFS='|' read -r name typ; do
 		[ -z "$name" ] && continue
+		if external_is_dummy_column "$name"; then
+			continue
+		fi
 		cast_t=$(external_pg_cast_type "$typ")
 		if [ "$first" -eq 1 ]; then
 			first=0
@@ -298,6 +385,9 @@ external_build_view_select()
 	local name typ cast_t
 	while IFS='|' read -r name typ; do
 		[ -z "$name" ] && continue
+		if external_is_dummy_column "$name"; then
+			continue
+		fi
 		cast_t=$(external_pg_cast_type "$typ")
 		if [ "$first" -eq 1 ]; then
 			first=0
@@ -311,31 +401,33 @@ external_build_view_select()
 
 ensure_pg_duckdb_extension()
 {
-	# DROP SCHEMA tpcds CASCADE can drop pg_duckdb when views depend on it.
+	# DROP SCHEMA … CASCADE can drop pg_duckdb when views depend on it.
 	echo "Ensuring pg_duckdb extension is installed in $DBNAME"
 	psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "CREATE EXTENSION IF NOT EXISTS pg_duckdb;"
 }
 
 create_external_views()
 {
-	local root hive_flag ddl_file table_name view_sql table_dir
+	local root hive_flag ddl_file table_name view_sql table_dir ddl_dir
+	external_bench_defaults
 	root=$(external_data_root)
+	ddl_dir=$(external_ddl_dir)
 	if external_hive_enabled; then
 		hive_flag="true"
 	else
 		hive_flag="false"
 	fi
 
-	echo "Creating schema tpcds and ${USE_EXTERNAL_FORMAT} views under $root (hive_partitioning => $hive_flag)"
+	echo "Creating schema ${TPC_SCHEMA} and ${USE_EXTERNAL_FORMAT} views under $root (hive_partitioning => $hive_flag)"
 	ensure_pg_duckdb_extension
-	psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "DROP SCHEMA IF EXISTS tpcds CASCADE; CREATE SCHEMA tpcds;"
+	psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "DROP SCHEMA IF EXISTS ${TPC_SCHEMA} CASCADE; CREATE SCHEMA ${TPC_SCHEMA};"
 	# Cascade above may have removed the extension via dependent views — reinstall.
 	ensure_pg_duckdb_extension
 
-	for ddl_file in $(ls "$LOCAL_PWD"/03_ddl/*.postgresql.*.sql | sort); do
+	for ddl_file in $(ls "$ddl_dir"/*.postgresql.*.sql | sort); do
 		table_name=$(basename "$ddl_file" | awk -F '.' '{print $3}')
 		case "$table_name" in
-			tpcds|foreignkeys|indexes) continue ;;
+			tpcds|tpch|foreignkeys|indexes) continue ;;
 		esac
 		if ! grep -qiE 'create[[:space:]]+table' "$ddl_file"; then
 			continue
@@ -343,19 +435,19 @@ create_external_views()
 		table_dir=$(external_table_dir "$table_name")
 		view_sql=$(mktemp)
 		{
-			echo "CREATE VIEW tpcds.${table_name} AS SELECT"
+			echo "CREATE VIEW ${TPC_SCHEMA}.${table_name} AS SELECT"
 			external_build_view_select "$ddl_file"
 			external_build_view_from_clause "$table_dir" "$hive_flag"
 			echo ";"
 		} > "$view_sql"
-		echo "Creating view tpcds.${table_name}"
+		echo "Creating view ${TPC_SCHEMA}.${table_name}"
 		psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -f "$view_sql"
 		rm -f "$view_sql"
 
 		# log() expects $i (sql path) to derive numeric id — same as 03_ddl/create_tables
 		i=$ddl_file
 		id=$(basename "$ddl_file" | awk -F '.' '{print $1}')
-		schema_name="tpcds"
+		schema_name="$TPC_SCHEMA"
 		start_log
 		log 0
 	done
@@ -367,25 +459,27 @@ create_parquet_views()
 	create_external_views
 }
 
-# Convert one table's .dat files to external format via pg_duckdb (no heap table).
+# Convert one table's flat files to external format via pg_duckdb (no heap table).
 convert_table_dat_to_external()
 {
 	local table_name=$1
 	local ddl_file=$2
-	local table_dir dat_glob cols_map opts sql_file date_sk date_glob target_path ext
+	local table_dir dat_glob cols_map opts sql_file hive_info hive_col hive_kind date_glob target_path ext
 	local hive_mode="no"
 
 	table_dir=$(external_table_dir "$table_name")
 	dat_glob=$(external_dat_glob "$table_name")
 	cols_map=$(external_build_csv_columns_map "$ddl_file")
-	date_sk=$(external_hive_date_sk_column "$table_name")
+	hive_info=$(external_hive_partition_column "$table_name")
+	hive_col=$(echo "$hive_info" | awk -F '|' '{print $1}')
+	hive_kind=$(echo "$hive_info" | awk -F '|' '{print $2}')
 	ext=$(external_file_ext)
 
 	mkdir -p "$(external_data_root)"
 	rm -rf "$table_dir"
 	mkdir -p "$table_dir"
 
-	if external_hive_enabled && [ -n "$date_sk" ]; then
+	if external_hive_enabled && [ -n "$hive_col" ]; then
 		hive_mode="hive"
 	fi
 	opts=$(external_build_copy_options "$hive_mode")
@@ -400,7 +494,7 @@ convert_table_dat_to_external()
 	sql_file=$(mktemp)
 	{
 		echo "SET duckdb.force_execution TO true;"
-		if [ "$hive_mode" = "hive" ]; then
+		if [ "$hive_mode" = "hive" ] && [ "$hive_kind" = "datesk" ]; then
 			date_glob=$(external_dat_glob "date_dim")
 			echo "COPY ("
 			echo "  SELECT * FROM duckdb.query(\$duck\$"
@@ -410,7 +504,19 @@ convert_table_dat_to_external()
 			echo "    ) t"
 			echo "    LEFT JOIN ("
 			external_date_dim_csv_duckdb_sql "$date_glob" | sed 's/^/      /'
-			echo "    ) d ON t.${date_sk} = d.d_date_sk"
+			echo "    ) d ON t.${hive_col} = d.d_date_sk"
+			echo "  \$duck\$)"
+			echo ") TO '${table_dir}'"
+			echo "WITH (${opts});"
+		elif [ "$hive_mode" = "hive" ] && [ "$hive_kind" = "date" ]; then
+			# TPC-H: native DATE columns → EXTRACT year/month (no date_dim).
+			echo "COPY ("
+			echo "  SELECT * FROM duckdb.query(\$duck\$"
+			echo "    SELECT t.*, CAST(EXTRACT(year FROM t.${hive_col}) AS INTEGER) AS year,"
+			echo "           CAST(EXTRACT(month FROM t.${hive_col}) AS INTEGER) AS month"
+			echo "    FROM ("
+			external_read_csv_duckdb_sql "$dat_glob" "$cols_map" "$ddl_file" | sed 's/^/      /'
+			echo "    ) t"
 			echo "  \$duck\$)"
 			echo ") TO '${table_dir}'"
 			echo "WITH (${opts});"
@@ -439,7 +545,7 @@ convert_table_dat_to_external()
 		return 1
 	fi
 
-	# Reject empty / non-parquet leftovers from failed writes.
+	# Reject empty leftovers from failed writes.
 	local out_bytes
 	out_bytes=$(find "$table_dir" -type f \( -name "*.${ext}" -o -name "*.parquet" -o -name "*.csv" -o -name "*.json" \) -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}')
 	if [ "${out_bytes:-0}" -le 0 ]; then
@@ -461,11 +567,14 @@ convert_table_dat_to_parquet()
 
 load_external_from_dat()
 {
-	local ddl_dir="$LOCAL_PWD/03_ddl"
+	local ddl_dir
 	local ddl_file table_name
 	local fail=0
 
-	echo "Converting .dat files to ${USE_EXTERNAL_FORMAT} under $(external_data_root)"
+	external_bench_defaults
+	ddl_dir=$(external_ddl_dir)
+
+	echo "Converting data files to ${USE_EXTERNAL_FORMAT} under $(external_data_root)"
 	mkdir -p "$(external_data_root)"
 	ensure_pg_duckdb_extension
 
@@ -473,14 +582,14 @@ load_external_from_dat()
 	for ddl_file in $(ls "$ddl_dir"/*.postgresql.*.sql | sort); do
 		table_name=$(basename "$ddl_file" | awk -F '.' '{print $3}')
 		case "$table_name" in
-			tpcds|foreignkeys|indexes) continue ;;
+			tpcds|tpch|foreignkeys|indexes) continue ;;
 		esac
 		if ! grep -qiE 'create[[:space:]]+table' "$ddl_file"; then
 			continue
 		fi
 
 		if ! compgen -G "$(external_dat_glob "$table_name")" > /dev/null; then
-			echo "WARNING: no .dat files for $table_name, skipping"
+			echo "WARNING: no source files for $table_name, skipping"
 			continue
 		fi
 
