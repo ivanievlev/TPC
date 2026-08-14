@@ -219,14 +219,14 @@ Step logs go into subdirectories of `log/`:
 
 - COLLECT_PROMETHEUS_DATA="true"
 
-	``Default "true": at run start, verify Prometheus is reachable at PROMETHEUS_URL (default http://127.0.0.1:9090).
+	``Default "true": at run start, only checks that Prometheus answers at PROMETHEUS_URL (the harness never starts Prometheus).
 	If unreachable, the run fails. When true, step 09_score also prints avg CPU %, avg RAM used GB,
 	avg network MB/s, and avg disk used GB for the 05_sql and 07_multi_user time windows (node_exporter metrics).
 	Set to "false" to skip the check and omit Prometheus rows from the score report.``
 
 - PROMETHEUS_URL="http://127.0.0.1:9090"
 
-	``Base URL for Prometheus HTTP API used when COLLECT_PROMETHEUS_DATA=true.``
+	``HTTP base URL of an already-running Prometheus (e.g. http://monitoring.example:9090). Required when COLLECT_PROMETHEUS_DATA=true.``
 
 - DUCKDB_MEMORY_LIMIT="4GB"
 

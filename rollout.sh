@@ -179,9 +179,9 @@ if [ "$RUN_SQL_WITH_DUCKDB" = "true" ]; then
 	fi
 fi
 
-# Prometheus availability (checked at run init when collection is enabled)
+# Prometheus availability: never start it — only probe PROMETHEUS_URL
 if [ "$COLLECT_PROMETHEUS_DATA" = "true" ]; then
-	echo "Checking Prometheus (COLLECT_PROMETHEUS_DATA=true)..."
+	echo "Checking Prometheus at PROMETHEUS_URL=$PROMETHEUS_URL ..."
 	# shellcheck source=score_helpers.sh
 	source "$PWD/score_helpers.sh"
 	check_prometheus_available || exit 1

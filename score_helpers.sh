@@ -126,8 +126,13 @@ FROM ${schema}.${table};
 
 check_prometheus_available()
 {
-	local url="${PROMETHEUS_URL:-http://127.0.0.1:9090}"
+	local url="${PROMETHEUS_URL:-}"
 	url=${url%/}
+	if [ -z "$url" ]; then
+		echo "ERROR: COLLECT_PROMETHEUS_DATA=true but PROMETHEUS_URL is empty."
+		echo "Set PROMETHEUS_URL to the Prometheus HTTP base (e.g. http://prom.example:9090)."
+		return 1
+	fi
 	if ! command -v curl >/dev/null 2>&1; then
 		echo "ERROR: COLLECT_PROMETHEUS_DATA=true but curl is not installed."
 		return 1
@@ -136,16 +141,15 @@ check_prometheus_available()
 	code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 "$url/-/ready" 2>/dev/null || true)
 	[ -z "$code" ] && code="000"
 	if [ "$code" != "200" ]; then
-		# Fallback: query API
 		code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 "$url/api/v1/status/buildinfo" 2>/dev/null || true)
 		[ -z "$code" ] && code="000"
 	fi
 	if [ "$code" != "200" ]; then
-		echo "ERROR: COLLECT_PROMETHEUS_DATA=true but Prometheus is not reachable at $url (HTTP $code)."
-		echo "Start Prometheus or set COLLECT_PROMETHEUS_DATA=false / PROMETHEUS_URL=..."
+		echo "ERROR: COLLECT_PROMETHEUS_DATA=true but Prometheus is not reachable at PROMETHEUS_URL=$url (HTTP $code)."
+		echo "Fix PROMETHEUS_URL or set COLLECT_PROMETHEUS_DATA=false."
 		return 1
 	fi
-	echo "Prometheus is available at $url"
+	echo "Prometheus OK at PROMETHEUS_URL=$url"
 	return 0
 }
 
@@ -156,8 +160,12 @@ prometheus_avg_over_window()
 	local expr="$1"
 	local start_u="$2"
 	local end_u="$3"
-	local url="${PROMETHEUS_URL:-http://127.0.0.1:9090}"
+	local url="${PROMETHEUS_URL:-}"
 	url=${url%/}
+	if [ -z "$url" ]; then
+		echo "n/a"
+		return 0
+	fi
 	local window=$((end_u - start_u))
 	[ "$window" -lt 1 ] && window=1
 	# Evaluate at end time with lookbehind window
