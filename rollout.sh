@@ -10,7 +10,7 @@ GEN_DATA_SCALE="$1"
 EXPLAIN_ANALYZE="$2"
 RANDOM_DISTRIBUTION="$3"
 MULTI_USER_COUNT="$4"
-RUN_COMPILE_TPCDS="$5"
+RUN_COMPILE_TPC="$5"
 RUN_GEN_DATA="$6"
 RUN_INIT="$7"
 RUN_DDL="$8"
@@ -59,7 +59,7 @@ TPC_MODE="${50:-TPC-DS}"
 
 init_tpc_mode
 
-if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPCDS" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SQL" == "" || "$RUN_SINGLE_USER_REPORT" == "" || "$RUN_MULTI_USER" == "" || "$RUN_MULTI_USER_REPORT" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
+if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPC" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SQL" == "" || "$RUN_SINGLE_USER_REPORT" == "" || "$RUN_MULTI_USER" == "" || "$RUN_MULTI_USER_REPORT" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
 	echo "Please run this script from tpc.sh so the correct parameters are passed to it."
 	exit 1
 fi
@@ -167,7 +167,7 @@ echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
 echo "EXPLAIN_ANALYZE: $EXPLAIN_ANALYZE"
 echo "RANDOM_DISTRIBUTION: $RANDOM_DISTRIBUTION"
 echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
-echo "RUN_COMPILE_TPCDS: $RUN_COMPILE_TPCDS  (compile step for current TPC_MODE)"
+echo "RUN_COMPILE_TPC: $RUN_COMPILE_TPC  (compile step for current TPC_MODE)"
 echo "RUN_GEN_DATA: $RUN_GEN_DATA"
 echo "RUN_INIT: $RUN_INIT"
 echo "RUN_DDL: $RUN_DDL"
@@ -192,8 +192,8 @@ echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
 echo "############################################################################"
 echo ""
 
-# RUN_COMPILE_TPCDS gates the compile step for either mode (name kept for compatibility).
-if [ "$RUN_COMPILE_TPCDS" == "true" ]; then
+# RUN_COMPILE_TPC gates the compile step for either mode (00_compile_tpcds / 00_compile_tpch).
+if [ "$RUN_COMPILE_TPC" == "true" ]; then
 	rm -f $PWD/log/end_compile_tpcds.log
 	rm -f $PWD/log/end_compile_tpch.log
 fi
@@ -230,7 +230,7 @@ step_run_flag()
 	local base
 	base=$(basename "$1")
 	case "$base" in
-		00_compile_tpcds|00_compile_tpch) echo "$RUN_COMPILE_TPCDS" ;;
+		00_compile_tpcds|00_compile_tpch) echo "$RUN_COMPILE_TPC" ;;
 		01_gen_data) echo "$RUN_GEN_DATA" ;;
 		02_init) echo "$RUN_INIT" ;;
 		03_ddl) echo "$RUN_DDL" ;;

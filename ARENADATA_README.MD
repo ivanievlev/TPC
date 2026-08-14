@@ -76,7 +76,7 @@ Step logs go into subdirectories of `log/`:
 - MULTI_USER_COUNT="10"
 - GEN_DATA_SCALE="3000"
 - SINGLE_USER_ITERATIONS="1"
-- RUN_COMPILE_TPCDS="true"
+- RUN_COMPILE_TPC="true"
 - RUN_GEN_DATA="false"
 - RUN_INIT="false"
 - RUN_DDL="false"
