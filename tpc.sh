@@ -115,12 +115,20 @@ check_variables()
 		echo "SKIP_QUERIES_LIST=\"\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
-        local count=$(grep "EXTRA_TPCDS_SCHEMAS" $MYVAR | wc -l)
-        if [ "$count" -eq "0" ]; then
-                echo "EXTRA_TPCDS_SCHEMAS=\"0\"" >> $MYVAR
-                new_variable=$(($new_variable + 1))
-
-        fi
+	# Migrate legacy EXTRA_TPCDS_SCHEMAS → EMPTY_SCHEMAS_CNT
+	if grep -q '^EXTRA_TPCDS_SCHEMAS=' "$MYVAR" 2>/dev/null; then
+		if ! grep -q '^EMPTY_SCHEMAS_CNT=' "$MYVAR" 2>/dev/null; then
+			echo "Renaming EXTRA_TPCDS_SCHEMAS -> EMPTY_SCHEMAS_CNT in $MYVAR"
+			sed -i 's/^EXTRA_TPCDS_SCHEMAS=/EMPTY_SCHEMAS_CNT=/' "$MYVAR"
+		else
+			sed -i '/^EXTRA_TPCDS_SCHEMAS=/d' "$MYVAR"
+		fi
+	fi
+	local count=$(grep "EMPTY_SCHEMAS_CNT" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "EMPTY_SCHEMAS_CNT=\"0\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
         local count=$(grep "TRUNCATE_BEFORE_LOAD" $MYVAR | wc -l)
         if [ "$count" -eq "0" ]; then
                 echo "TRUNCATE_BEFORE_LOAD=\"true\"" >> $MYVAR
@@ -596,7 +604,7 @@ echo_variables()
 	echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"
 	echo "EXCLUDE_HEAVY_QUERIES: $EXCLUDE_HEAVY_QUERIES"
 	echo "SKIP_QUERIES_LIST: $SKIP_QUERIES_LIST"
-        echo "EXTRA_TPCDS_SCHEMAS: $EXTRA_TPCDS_SCHEMAS"
+        echo "EMPTY_SCHEMAS_CNT: $EMPTY_SCHEMAS_CNT"
 	echo "TRUNCATE_BEFORE_LOAD: $TRUNCATE_BEFORE_LOAD"
 	echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
 	echo "STATEMENT_TIMEOUT: $STATEMENT_TIMEOUT"
@@ -659,7 +667,8 @@ _tpcds_kill_tree()
 	fi
 }
 
-# Stop leftover TPC runs (previous tpc.sh / rollout / test.sh / dsqgen / dbgen / qgen).
+# Stop leftover TPC runs for BOTH TPC-DS and TPC-H
+# (tpc.sh / rollout / test.sh / dsdgen / dsqgen / dbgen / qgen / generate_*.sh / gpfdist / psql).
 # Does not touch the current entry script ($$) or its ancestors. Called before this run starts rollout.
 kill_previous_processes()
 {
@@ -673,22 +682,42 @@ kill_previous_processes()
 
 	self=$$
 	repo="${INSTALL_DIR}/${REPO}"
-	echo "KILL_PREVIOUS_PROCESSES=true: searching for leftover TPC processes (excluding pid $self)..."
+	echo "KILL_PREVIOUS_PROCESSES=true: searching for leftover TPC-DS and TPC-H processes (excluding pid $self)..."
 
 	candidates=$(
 		{
+			# Entry / top-level rollout
 			pgrep -f "${repo}/tpc\\.sh" 2>/dev/null || true
 			pgrep -f "${repo}/rollout\\.sh" 2>/dev/null || true
-			pgrep -f "${repo}/tpcds/[0-9][^ ]*/rollout\\.sh" 2>/dev/null || true
-			pgrep -f "${repo}/tpch/[0-9][^ ]*/rollout\\.sh" 2>/dev/null || true
-			pgrep -f "${repo}/tpcds/07_multi_user/test\\.sh" 2>/dev/null || true
-			pgrep -f "${repo}/tpch/07_multi_user/test\\.sh" 2>/dev/null || true
-			pgrep -f "${repo}/[^ ]*dsqgen" 2>/dev/null || true
-			pgrep -f "${repo}/[^ ]*dbgen" 2>/dev/null || true
-			pgrep -f "${repo}/[^ ]*qgen" 2>/dev/null || true
 			pgrep -f "/tpc\\.sh" 2>/dev/null || true
 			pgrep -f "[.]/tpc\\.sh" 2>/dev/null || true
+
+			# Any step script under either suite (rollout, test, generate_*, compile, …)
+			pgrep -f "${repo}/tpcds/" 2>/dev/null || true
+			pgrep -f "${repo}/tpch/" 2>/dev/null || true
+
+			# Multi-user sessions
+			pgrep -f "${repo}/tpcds/07_multi_user/" 2>/dev/null || true
+			pgrep -f "${repo}/tpch/07_multi_user/" 2>/dev/null || true
+
+			# Generators: may run from repo OR from \$HOME after scp to segments
+			pgrep -f "(^|/)dsqgen( |$)" 2>/dev/null || true
+			pgrep -f "(^|/)dsdgen( |$)" 2>/dev/null || true
+			pgrep -f "(^|/)dbgen( |$)" 2>/dev/null || true
+			pgrep -f "(^|/)qgen( |$)" 2>/dev/null || true
+			pgrep -f "generate_data\\.sh" 2>/dev/null || true
+			pgrep -f "generate_queries\\.sh" 2>/dev/null || true
+
+			# Greenplum load helper (both suites)
+			pgrep -f "(^|/)gpfdist( |$)" 2>/dev/null || true
+			pgrep -f "start_gpfdist\\.sh" 2>/dev/null || true
+
+			# psql running SQL from either suite
+			pgrep -f "psql .*-f ${repo}/tpcds/" 2>/dev/null || true
+			pgrep -f "psql .*-f ${repo}/tpch/" 2>/dev/null || true
 			pgrep -f "psql .*-f ${repo}/" 2>/dev/null || true
+
+			# How rollout is launched from tpc.sh
 			pgrep -f "su -l .*${repo}.*rollout\\.sh" 2>/dev/null || true
 			pgrep -f "sudo .*-u .*${repo}.*rollout\\.sh" 2>/dev/null || true
 			pgrep -f "bash -lc .*${repo}.*rollout\\.sh" 2>/dev/null || true
@@ -705,33 +734,35 @@ kill_previous_processes()
 
 	if [ "$found" -eq 0 ]; then
 		echo "  (no leftover TPC processes found)"
-		return 0
+	else
+		sleep 2
+
+		for pid in $candidates; do
+			if _tpcds_is_self_or_ancestor "$pid"; then
+				continue
+			fi
+			if kill -0 "$pid" 2>/dev/null || run_priv kill -0 "$pid" 2>/dev/null; then
+				_tpcds_kill_tree "$pid" KILL
+			fi
+		done
 	fi
 
-	sleep 2
-
-	for pid in $candidates; do
-		if _tpcds_is_self_or_ancestor "$pid"; then
-			continue
-		fi
-		if kill -0 "$pid" 2>/dev/null || run_priv kill -0 "$pid" 2>/dev/null; then
-			_tpcds_kill_tree "$pid" KILL
-		fi
-	done
-
-	if command -v psql >/dev/null 2>&1 && [ -n "${DBNAME:-}" ] && [ -n "${ADMIN_USER:-}" ]; then
-		echo "Terminating leftover client backends in database $DBNAME..."
-		as_admin "psql -d \"$DBNAME\" -v ON_ERROR_STOP=0 -q -c \"
-SELECT pg_terminate_backend(pid) AS terminated, pid, left(query, 80) AS query
+	# Terminate leftover client backends in the current DB and common DS/H database names.
+	if command -v psql >/dev/null 2>&1 && [ -n "${ADMIN_USER:-}" ]; then
+		local dbs
+		dbs=$(printf '%s\n' "${DBNAME:-}" "pg_tpcds" "pg_tpch" "gp_tpcds" "gp_tpch" | awk 'NF && !seen[$0]++' | paste -sd, -)
+		echo "Terminating leftover client backends in databases: $dbs ..."
+		as_admin "psql -d postgres -v ON_ERROR_STOP=0 -q -c \"
+SELECT pg_terminate_backend(pid) AS terminated, datname, pid, left(query, 80) AS query
 FROM pg_stat_activity
-WHERE datname = current_database()
+WHERE datname = ANY(string_to_array('$dbs', ','))
   AND pid <> pg_backend_pid()
   AND backend_type = 'client backend';
 \"" 2>/dev/null || true
 		sleep 1
 	fi
 
-	echo "Done killing leftover TPC processes."
+	echo "Done killing leftover TPC-DS / TPC-H processes."
 }
 
 make_prerequisites()
@@ -822,7 +853,7 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-as_admin "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\""
+as_admin "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\""
 
 # Final marker for tpc.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).

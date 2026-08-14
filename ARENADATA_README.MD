@@ -110,10 +110,11 @@ Step logs go into subdirectories of `log/`:
 	Examples: SKIP_QUERIES_LIST="85" or SKIP_QUERIES_LIST="1,64,85".
 	Invalid values fail at startup: out-of-range (e.g. 164) or non-integer (e.g. n4).``
 
-- EXTRA_TPCDS_SCHEMAS="0"
+- EMPTY_SCHEMAS_CNT="0"
 
-	``It is used to create similar schemas with *blank* objects to test great data catalog. Specify number of such extra schemas.`` 
-	
+	``Number of extra schemas with the same *blank* (empty) objects as the main schema, for catalog stress tests.
+	Works for both TPC-DS and TPC-H: creates tpcds1..N or tpch1..N. Former name: EXTRA_TPCDS_SCHEMAS.``
+
 - TRUNCATE_BEFORE_LOAD="true"
 
 	``It is used to make purge faster with TRUNCATE commands instead of DELETE FROM.``

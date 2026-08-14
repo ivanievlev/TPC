@@ -403,3 +403,101 @@ create_hosts_file()
 		echo $MASTER_HOST > $LOCAL_PWD/segment_hosts.txt
 	fi
 }
+
+# Apply one DDL file into target schema $1.
+# Files with :SCHEMA use psql -v SCHEMA=; otherwise substitute TPC_SCHEMA / ext_TPC_SCHEMA (postgresql hardcodes).
+# Extra args after $2 are passed to psql (e.g. -v EVERY_STORE_SALES=10).
+run_ddl_sql_for_schema()
+{
+	local target_schema="$1"
+	local sqlfile="$2"
+	shift 2
+	local base="${TPC_SCHEMA:-tpcds}"
+
+	if grep -q ':SCHEMA' "$sqlfile"; then
+		PGOPTIONS='--client-min-messages=warning' psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -P pager=off \
+			-f "$sqlfile" -v SCHEMA="$target_schema" "$@"
+	else
+		sed -E \
+			-e "s/\\bext_${base}\\./ext_${target_schema}./g" \
+			-e "s/\\b${base}\\./${target_schema}./g" \
+			-e "s/EXISTS ext_${base}\\b/EXISTS ext_${target_schema}/g" \
+			-e "s/EXISTS ${base}\\b/EXISTS ${target_schema}/g" \
+			-e "s/SCHEMA ext_${base}\\b/SCHEMA ext_${target_schema}/g" \
+			-e "s/SCHEMA ${base}\\b/SCHEMA ${target_schema}/g" \
+			"$sqlfile" \
+		| PGOPTIONS='--client-min-messages=warning' psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -P pager=off "$@"
+	fi
+}
+
+# Create all *.$filter.*.sql objects in $1 schema. Expects cwd/PWD = 03_ddl step dir.
+# $2 = filter (gpdb|postgresql). Remaining args go to psql as -v ….
+create_tables_for_schema()
+{
+	local schema="$1"
+	local filter="$2"
+	shift 2
+	local i id schema_name table_name z table_name2 distribution DISTRIBUTED_BY
+
+	for i in $(ls "$PWD"/*."$filter".*.sql); do
+		id=$(echo "$i" | awk -F '.' '{print $1}')
+		schema_name=$(echo "$i" | awk -F '.' '{print $2}')
+		table_name=$(echo "$i" | awk -F '.' '{print $3}')
+		start_log
+
+		if [ "$filter" == "gpdb" ]; then
+			if [ "${RANDOM_DISTRIBUTION:-false}" == "true" ]; then
+				DISTRIBUTED_BY="DISTRIBUTED RANDOMLY"
+			else
+				DISTRIBUTED_BY=""
+				if [ -f "$PWD/distribution.txt" ]; then
+					for z in $(cat "$PWD/distribution.txt"); do
+						table_name2=$(echo "$z" | awk -F '|' '{print $2}')
+						if [ "$table_name2" == "$table_name" ]; then
+							distribution=$(echo "$z" | awk -F '|' '{print $3}')
+							DISTRIBUTED_BY="DISTRIBUTED BY (""$distribution"")"
+						fi
+					done
+				fi
+			fi
+		else
+			DISTRIBUTED_BY=""
+		fi
+
+		run_ddl_sql_for_schema "$schema" "$i" -v SMALL_STORAGE="${SMALL_STORAGE:-}" \
+			-v MEDIUM_STORAGE="${MEDIUM_STORAGE:-}" -v LARGE_STORAGE="${LARGE_STORAGE:-}" \
+			-v DISTRIBUTED_BY="$DISTRIBUTED_BY" "$@"
+		log
+	done
+}
+
+# Create EMPTY_SCHEMAS_CNT extra schemas (${TPC_SCHEMA}1..) with the same empty objects as the main schema.
+# $1 = filter; remaining optional psql -v args for table DDL (partition EVERY_*, etc.).
+create_empty_catalog_schemas()
+{
+	local filter="$1"
+	shift
+	local n i schema psql_count
+	n="${EMPTY_SCHEMAS_CNT:-0}"
+	if ! [[ "$n" =~ ^[0-9]+$ ]] || [ "$n" -le 0 ]; then
+		return 0
+	fi
+
+	echo "Creating DDL for $n empty catalog schema(s) (${TPC_SCHEMA}1..${TPC_SCHEMA}${n})"
+	for i in $(seq 1 "$n"); do
+		schema="${TPC_SCHEMA}${i}"
+		echo "Running stream $i: Creating DDL for schema $schema"
+		echo "Now executing DDLs. This may take a while..."
+		create_tables_for_schema "$schema" "$filter" "$@" &
+	done
+
+	sleep 10
+	psql_count=$(ps -ef | grep psql | grep 03_ddl | grep -v grep | wc -l)
+	while [ "$psql_count" -gt "0" ]; do
+		echo -ne "."
+		sleep 10
+		psql_count=$(ps -ef | grep psql | grep 03_ddl | grep -v grep | wc -l)
+	done
+	echo "done."
+	echo ""
+}

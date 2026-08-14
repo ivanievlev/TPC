@@ -13,7 +13,7 @@ RANDOM_DISTRIBUTION=$3
 MULTI_USER_COUNT=$4
 SINGLE_USER_ITERATIONS=$5
 PARTITION_EVERY_FACTOR=$6
-EXTRA_TPCDS_QUERIES=$8
+EMPTY_SCHEMAS_CNT=${8:-0}
 HEAP_ONLY=${21}
 REFERENCE_TABLE_TYPE=${26}
 DBNAME=${27}
@@ -91,62 +91,23 @@ get_psql_count()
         psql_count=$(ps -ef | grep psql | grep 03_ddl | grep -v grep | wc -l)
 }
 
-
-create_tables()
-{
-for i in $(ls $PWD/*.$filter.*.sql); do
-	id=$(echo $i | awk -F '.' '{print $1}')
-	schema_name=$(echo $i | awk -F '.' '{print $2}')
-	table_name=$(echo $i | awk -F '.' '{print $3}')
-	start_log
-
-	if [ "$filter" == "gpdb" ]; then
-		if [ "$RANDOM_DISTRIBUTION" == "true" ]; then
-			DISTRIBUTED_BY="DISTRIBUTED RANDOMLY"
-		else
-			for z in $(cat $PWD/distribution.txt); do
-				table_name2=$(echo $z | awk -F '|' '{print $2}')
-				if [ "$table_name2" == "$table_name" ]; then
-					distribution=$(echo $z | awk -F '|' '{print $3}')
-				fi
-			done
-			DISTRIBUTED_BY="DISTRIBUTED BY (""$distribution"")"
-		fi
-	else
-		DISTRIBUTED_BY=""
-	fi
-
-	#echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -q -P pager=off -f $i -v SMALL_STORAGE=\"$SMALL_STORAGE\" -v MEDIUM_STORAGE=\"$MEDIUM_STORAGE\" -v LARGE_STORAGE=\"$LARGE_STORAGE\" -v DISTRIBUTED_BY=\"$DISTRIBUTED_BY\""
-	PGOPTIONS='--client-min-messages=warning' psql -d $DBNAME -v ON_ERROR_STOP=1 -q -P pager=off -f $i -v SMALL_STORAGE="$SMALL_STORAGE" -v MEDIUM_STORAGE="$MEDIUM_STORAGE" -v LARGE_STORAGE="$LARGE_STORAGE" -v DISTRIBUTED_BY="$DISTRIBUTED_BY" -v EVERY_WEB_RETURNS="$EVERY_WEB_RETURNS" -v EVERY_CATALOG_RETURNS="$EVERY_CATALOG_RETURNS" -v EVERY_STORE_SALES="$EVERY_STORE_SALES" -v EVERY_CATALOG_SALES="$EVERY_CATALOG_SALES" -v EVERY_WEB_SALES="$EVERY_WEB_SALES" -v EVERY_STORE_RETURNS="$EVERY_STORE_RETURNS" -v EVERY_INVENTORY="$EVERY_INVENTORY" -v SCHEMA=$1
-	log
-done
-}
+DDL_EVERY_ARGS=(
+	-v EVERY_WEB_RETURNS="$EVERY_WEB_RETURNS"
+	-v EVERY_CATALOG_RETURNS="$EVERY_CATALOG_RETURNS"
+	-v EVERY_STORE_SALES="$EVERY_STORE_SALES"
+	-v EVERY_CATALOG_SALES="$EVERY_CATALOG_SALES"
+	-v EVERY_WEB_SALES="$EVERY_WEB_SALES"
+	-v EVERY_STORE_RETURNS="$EVERY_STORE_RETURNS"
+	-v EVERY_INVENTORY="$EVERY_INVENTORY"
+)
 
 if [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; then
-	echo "Creating ${USE_EXTERNAL_FORMAT} views for schema TPCDS (no heap tables)"
+	echo "Creating ${USE_EXTERNAL_FORMAT} views for schema ${TPC_SCHEMA} (no heap tables)"
 	create_external_views
 else
-	echo "Creating DDL for schema TPCDS"
-	create_tables "tpcds"
-
-	echo "Creating DDL for extra schemas TPCDSx"
-	for i in $(seq 1 $EXTRA_TPCDS_QUERIES); do
-	        schema="tpcds$i"
-		echo "Running stream$i for Creating DDL for schema $schema"
-		echo "Now executing DDLs. This make take a while..."
-	        create_tables "$schema" &
-	done
-
-	sleep 10
-
-	get_psql_count
-	while [ "$psql_count" -gt "0" ]; do
-		echo -ne "."
-	        sleep 10
-	        get_psql_count
-	done
-	echo "done."
-	echo ""
+	echo "Creating DDL for schema ${TPC_SCHEMA}"
+	create_tables_for_schema "$TPC_SCHEMA" "$filter" "${DDL_EVERY_ARGS[@]}"
+	create_empty_catalog_schemas "$filter" "${DDL_EVERY_ARGS[@]}"
 fi
 
 #external tables are the same for all gpdb

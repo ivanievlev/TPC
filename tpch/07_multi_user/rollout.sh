@@ -40,27 +40,29 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 	rm -f $PWD/../../log/rollout_testing_log/rollout_testing_*.log
 	rm -f $PWD/../../log/multi_explain_analyze_log/*multi.explain_analyze*.log
 
-	#Create queries via qgen streams
-	echo "cd $PWD/queries"
-	cd $PWD/queries
+	#Create queries via qgen streams (do not rely on $PWD after cd — bash rewrites it)
+	local_dir="$PWD"
+	queries_dir="$local_dir/queries"
+	echo "cd $queries_dir"
+	cd "$queries_dir"
 	for i in $(seq 1 $MULTI_USER_COUNT); do
-		sql_dir="$PWD"/tpch/"$i"
+		sql_dir="$local_dir/tpch/$i"
 		echo "checking for directory $sql_dir"
 		if [ ! -d "$sql_dir" ]; then
 			echo "mkdir -p $sql_dir"
-			mkdir -p $sql_dir
+			mkdir -p "$sql_dir"
 		fi
 		echo "rm -f $sql_dir/*.sql"
-		rm -f $sql_dir/*.sql
+		rm -f "$sql_dir"/*.sql
 		echo "./qgen -p $i -c -v > $sql_dir/multi.sql"
-		./qgen -p $i -c -v > $sql_dir/multi.sql
+		./qgen -p $i -c -v > "$sql_dir/multi.sql"
 	done
-	cd ..
+	cd "$local_dir"
 
 	for x in $(seq 1 $MULTI_USER_COUNT); do
-		session_log=$PWD/../../log/testing_session_log/testing_session_$x.log
-		echo "$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
-		$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST" |& tee $session_log &
+		session_log=$local_dir/../../log/testing_session_log/testing_session_$x.log
+		echo "$local_dir/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
+		$local_dir/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST" |& tee $session_log &
 	done
 
 	sleep 60
