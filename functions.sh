@@ -404,6 +404,19 @@ create_hosts_file()
 	fi
 }
 
+# Ensure a rollout_*.log exists and is readable for server-side COPY FROM (reports).
+# Missing files happen when the corresponding step was skipped (e.g. no compile_tpch run).
+ensure_rollout_log_for_copy()
+{
+	local logfile="$1"
+	mkdir -p "$(dirname "$logfile")"
+	if [ ! -f "$logfile" ]; then
+		echo "WARNING: $logfile not found (step may have been skipped); creating empty file for COPY"
+		: > "$logfile"
+	fi
+	chmod a+r "$logfile" 2>/dev/null || true
+}
+
 # Apply one DDL file into target schema $1.
 # Files with :SCHEMA use psql -v SCHEMA=; otherwise substitute TPC_SCHEMA / ext_TPC_SCHEMA (postgresql hardcodes).
 # Extra args after $2 are passed to psql (e.g. -v EVERY_STORE_SALES=10).
