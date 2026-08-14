@@ -9,7 +9,7 @@ TPC_MODE="TPC-DS"   # default — tpcds/00_compile_tpcds … tpcds/09_score
 TPC_MODE="TPC-H"    # tpch/00_compile_tpch … tpch/09_score
 ```
 
-Shared knobs in `tpcds_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, …) apply to **both** modes. Entry points: `./tpcds.sh` or `./tpc.sh`.
+Shared knobs in `tpc_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, …) apply to **both** modes. Entry point: `./tpc.sh`.
 
 TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H.
 
@@ -21,7 +21,7 @@ TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (p
 - Added support for Greenplum 7.x 
 - Changed compression options from quicklz to zstd
 - Added new parameters
-- Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
+- Added `REPO_BRANCH` parameter to select the git branch used by `tpc.sh` (default: `master`)
 - Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN`, `DUCKDB_THREADS_FOR_POSTGRES_SCAN`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`, `SKIP_QUERIES_LIST`
 
 ## Installation
@@ -34,22 +34,23 @@ cd TPC-DS/
 chmod 777 $(find /arenadata -type d)
 
 <preliminary run to get paramater file>
-nohup ./tpcds.sh > tpcds.log 2>&1 < tpcds.log &
+nohup ./tpc.sh > tpc.log 2>&1 < tpc.log &
 
 <editing parameters>
-nano tpcds_variables.sh
+nano tpc_variables.sh
 
 <main run>
-nohup ./tpcds.sh > tpcds.log 2>&1 < tpcds.log &
+nohup ./tpc.sh > tpc.log 2>&1 < tpc.log &
 
 <watching the log>
-tail -f tpcds.log 
+tail -f tpc.log 
 
 When the run finishes successfully, the last line is:
 The end. All TPC-DS steps completed
+(or All TPC-H steps completed, depending on TPC_MODE)
 
-A timestamped copy of `tpcds.log` is also saved under `log/archived_results/`:
-`tpcds_SF<scale>_<format>[_with-duckdb]_<YYYYMMDD_HHMMSS>.log`
+A timestamped copy of `tpc.log` is also saved under `log/archived_results/`:
+`tpcds_SF<scale>_<format>[_with-duckdb]_<YYYYMMDD_HHMMSS>.log` (or `tpch_…`)
 (`format` is `heap`, or `parquet`/`csv`/`json`; `_with-duckdb` only when `RUN_SQL_WITH_DUCKDB=true`).
 
 Step logs go into subdirectories of `log/`:
@@ -194,11 +195,11 @@ Step logs go into subdirectories of `log/`:
 
 - KILL_PREVIOUS_PROCESSES="true"
 
-	``At the start of tpcds.sh (after variables are printed), when "true" (default), find leftover
-	TPC-DS Linux processes from a previous unfinished run (tpcds.sh, rollout.sh, multi-user test.sh,
-	dsqgen, psql -f .../TPC-DS/...) and terminate them (TERM, then KILL). Also runs pg_terminate_backend
+	``At the start of tpc.sh (after variables are printed), when "true" (default), find leftover
+	TPC Linux processes from a previous unfinished run (tpc.sh, rollout.sh, multi-user test.sh,
+	dsqgen/dbgen/qgen, psql -f .../TPC/...) and terminate them (TERM, then KILL). Also runs pg_terminate_backend
 	on leftover client sessions in DBNAME so orphan queries cannot block DROP SCHEMA/DDL. The current
-	tpcds.sh and its ancestors are never killed. When "false", no process cleanup is done.``
+	tpc.sh and its ancestors are never killed. When "false", no process cleanup is done.``
 
 - RUN_SQL_WITH_DUCKDB="false"
 

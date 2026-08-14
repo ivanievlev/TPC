@@ -24,7 +24,7 @@ init_tpc_mode()
 			TPC_TESTING_SCHEMA="tpcds_testing"
 			TPC_QUERY_ID_MAX=99
 			TPC_COMPILE_STEP_NAME="compile_tpcds"
-			TPC_ENTRY_SCRIPT="tpcds.sh"
+			TPC_ENTRY_SCRIPT="tpc.sh"
 			TPC_LOG_PREFIX="tpcds"
 			TPC_DATA_PREFIX="tpcds"
 			TPC_STEP_ROOT="tpcds"   # relative to repo root; resolved by rollout
@@ -36,7 +36,7 @@ init_tpc_mode()
 			TPC_TESTING_SCHEMA="tpch_testing"
 			TPC_QUERY_ID_MAX=22
 			TPC_COMPILE_STEP_NAME="compile_tpch"
-			TPC_ENTRY_SCRIPT="tpcds.sh"
+			TPC_ENTRY_SCRIPT="tpc.sh"
 			TPC_LOG_PREFIX="tpch"
 			TPC_DATA_PREFIX="tpch"
 			TPC_STEP_ROOT="tpch"

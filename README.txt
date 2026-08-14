@@ -17,7 +17,7 @@ Version 2.2.x now supports Greenplum version 5.x.
 Query Options
 ########################################################################################
 You can have the queries execute with "EXPLAIN ANALYZE" in order to see exactly the 
-query plan used, the cost, the memory used, etc.  This is done in tpcds_variables.sh
+query plan used, the cost, the memory used, etc.  This is done in tpc_variables.sh
 like this:
 EXPLAIN_ANALYZE="true"
 
@@ -39,16 +39,16 @@ Installation
 1. ssh to the master host with root
 ssh gpadmin@mdw; sudo bash
 
-2. Download the tpcds.sh file
-curl https://raw.githubusercontent.com/arenadata/TPC-DS/master/tpcds.sh > tpcds.sh
-chmod 755 tpcds.sh
+2. Download the tpc.sh file
+curl https://raw.githubusercontent.com/ivanievlev/TPC/master/tpc.sh > tpc.sh
+chmod 755 tpc.sh
 
 ########################################################################################
 Variables and Configuration
 ########################################################################################
-By default, the installation will create the scripts in /arenadata/TPC-DS on the 
+By default, the installation will create the scripts in /arenadata/TPC on the 
 Master host.  This can be changed by editing the dynamically configured 
-tpcds_variables.sh file that is created the first time tpcds.sh is run.  
+tpc_variables.sh file that is created the first time tpc.sh is run.  
 
 Also by default, TPC-DS files are generated on each Segment Host / Data Node in the 
 Segement's PGDATA/arenadata directory.  If there isn't enough space in this directory
@@ -58,13 +58,13 @@ enough space.
 ########################################################################################
 Execution
 ########################################################################################
-1. Execute tpcds.sh
-nohup ./tpcds.sh > tpcds.log 2>&1 < tpcds.log &
+1. Execute tpc.sh
+nohup ./tpc.sh > tpc.log 2>&1 < tpc.log &
 
 ########################################################################################
 Notes
 ########################################################################################
-- tpcds_variables.sh file will be created with variables you can adjust
+- tpc_variables.sh file will be created with variables you can adjust
 - Files for the benchmark will be created in a sub-directory named arenadata located 
 in each segment directory on each segment host / data node.
 You can update these directories to be symbolic links to better utilize the disk 

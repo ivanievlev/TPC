@@ -60,7 +60,7 @@ TPC_MODE="${50:-TPC-DS}"
 init_tpc_mode
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPCDS" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SQL" == "" || "$RUN_SINGLE_USER_REPORT" == "" || "$RUN_MULTI_USER" == "" || "$RUN_MULTI_USER_REPORT" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
-	echo "Please run this script from tpcds.sh / tpc.sh so the correct parameters are passed to it."
+	echo "Please run this script from tpc.sh so the correct parameters are passed to it."
 	exit 1
 fi
 if [ -z "$STATEMENT_TIMEOUT" ]; then

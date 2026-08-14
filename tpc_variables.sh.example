@@ -1,4 +1,4 @@
-# Example / starting point for tpcds_variables.sh (copy to tpcds_variables.sh and edit).
+# Example / starting point for tpc_variables.sh (copy to tpc_variables.sh and edit).
 REPO="TPC"
 REPO_URL="https://github.com/ivanievlev/TPC"
 REPO_BRANCH="MERGE_TPCH"

@@ -3,6 +3,7 @@ log/
 *.log
 
 # Local config / runtime
+tpc_variables.sh
 tpcds_variables.sh
 segment_hosts.txt
 
