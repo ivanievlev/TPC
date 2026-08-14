@@ -213,8 +213,9 @@ Step logs go into subdirectories of `log/`:
 	with parquet/csv/json DuckDB reads the corresponding views.
 	Validation: USE_EXTERNAL_FORMAT in {parquet,csv,json} requires RUN_SQL_WITH_DUCKDB="true", otherwise the run fails with:
 	"<format> files can't be processed without DuckDB. Change format or activate DuckDB".
-	At the start of the run, if RUN_SQL_WITH_DUCKDB="true", the script checks that extension pg_duckdb is present in
-	pg_available_extensions and runs CREATE EXTENSION IF NOT EXISTS pg_duckdb; otherwise it exits with an error.``
+	At the start of the run, if RUN_SQL_WITH_DUCKDB="true", the script ensures database DBNAME exists,
+	checks pg_extension, and runs CREATE EXTENSION IF NOT EXISTS pg_duckdb when missing.
+	Fails only if CREATE EXTENSION itself fails (package/shared library not installed on the server).``
 
 - DUCKDB_MEMORY_LIMIT="4GB"
 

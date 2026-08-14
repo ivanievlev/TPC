@@ -131,21 +131,36 @@ case "$USE_EXTERNAL_FORMAT" in
 esac
 
 if [ "$RUN_SQL_WITH_DUCKDB" = "true" ]; then
-	echo "Checking pg_duckdb extension (RUN_SQL_WITH_DUCKDB=true)..."
+	echo "Ensuring pg_duckdb extension (RUN_SQL_WITH_DUCKDB=true)..."
 	if ! command -v psql >/dev/null 2>&1; then
-		echo "ERROR: psql not found in PATH; cannot verify pg_duckdb extension."
+		echo "ERROR: psql not found in PATH; cannot install/verify pg_duckdb."
 		exit 1
 	fi
-	duckdb_available=$(psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -t -A -c "SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_duckdb';" 2>/dev/null || echo "0")
-	if [ "$duckdb_available" != "1" ]; then
-		echo "ERROR: RUN_SQL_WITH_DUCKDB=true but extension pg_duckdb is not available in database $DBNAME."
-		exit 1
+
+	# Database must exist before CREATE EXTENSION (02_init may not have run yet).
+	db_exists=$(psql -d postgres -v ON_ERROR_STOP=1 -q -t -A -c "SELECT count(*) FROM pg_database WHERE datname = '$DBNAME';" 2>/dev/null | tr -d '[:space:]')
+	if [ "$db_exists" != "1" ]; then
+		echo "Database $DBNAME does not exist yet; creating it for pg_duckdb..."
+		psql -d postgres -v ON_ERROR_STOP=1 -q -c "CREATE DATABASE $DBNAME;"
 	fi
-	if ! psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "CREATE EXTENSION IF NOT EXISTS pg_duckdb;"; then
-		echo "ERROR: failed to CREATE EXTENSION pg_duckdb in database $DBNAME."
-		exit 1
+
+	ext_installed=$(psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -t -A -c "SELECT count(*) FROM pg_extension WHERE extname = 'pg_duckdb';" 2>/dev/null | tr -d '[:space:]')
+	if [ "$ext_installed" = "1" ]; then
+		echo "pg_duckdb is already installed in $DBNAME."
+	else
+		echo "pg_duckdb not installed in $DBNAME; running CREATE EXTENSION pg_duckdb..."
+		if ! psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -c "CREATE EXTENSION IF NOT EXISTS pg_duckdb;"; then
+			echo "ERROR: failed to CREATE EXTENSION pg_duckdb in database $DBNAME."
+			echo "Install the pg_duckdb package/shared library on the server, then re-run."
+			exit 1
+		fi
+		ext_installed=$(psql -d "$DBNAME" -v ON_ERROR_STOP=1 -q -t -A -c "SELECT count(*) FROM pg_extension WHERE extname = 'pg_duckdb';" 2>/dev/null | tr -d '[:space:]')
+		if [ "$ext_installed" != "1" ]; then
+			echo "ERROR: CREATE EXTENSION pg_duckdb reported success but extension is still missing in $DBNAME."
+			exit 1
+		fi
+		echo "pg_duckdb extension created in $DBNAME."
 	fi
-	echo "pg_duckdb extension is available and installed."
 fi
 
 create_directories()
