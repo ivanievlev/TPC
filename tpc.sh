@@ -8,6 +8,23 @@ MYVAR="tpc_variables.sh"
 ##################################################################################################################################################
 # Functions
 ##################################################################################################################################################
+# Privileged ops as root via passwordless sudo (script itself never runs as root).
+run_priv()
+{
+	sudo -n -- "$@"
+}
+
+# Run a bash -lc command as ADMIN_USER (replaces su -l / su -c).
+as_admin()
+{
+	local cmd="$1"
+	if [ "$(id -un)" = "$ADMIN_USER" ]; then
+		bash -lc "$cmd"
+	else
+		sudo -n -u "$ADMIN_USER" -H bash -lc "$cmd"
+	fi
+}
+
 check_variables()
 {
 	new_variable="0"
@@ -376,16 +393,31 @@ check_variables()
 
 check_user()
 {
-	### Make sure root is executing the script. ###
+	### Never run as root: require a normal user with passwordless sudo. ###
 	echo "############################################################################"
-	echo "Make sure root is executing this script."
+	echo "Make sure the caller is a non-root user with passwordless sudo."
 	echo "############################################################################"
 	echo ""
-	local WHOAMI=`whoami`
-	if [ "$WHOAMI" != "root" ]; then
-		echo "Script must be executed as root!"
+	if [ "$(id -u)" -eq 0 ]; then
+		echo "ERROR: do not run $MYCMD as root."
+		echo "Run it as a normal user (e.g. luka). Privileged steps use sudo."
 		exit 1
 	fi
+	if ! command -v sudo >/dev/null 2>&1; then
+		echo "ERROR: sudo is required."
+		exit 1
+	fi
+	# nohup/redirected stdin cannot prompt for a password — require NOPASSWD.
+	if ! sudo -n true 2>/dev/null; then
+		echo "ERROR: passwordless sudo failed for $(whoami) (sudo -n)."
+		echo "Configure NOPASSWD in sudoers for this user."
+		exit 1
+	fi
+	# Repair config left root-owned by older runs.
+	if [ -f "$PWD/$MYVAR" ] && [ ! -w "$PWD/$MYVAR" ]; then
+		run_priv chown "$(whoami):" "$PWD/$MYVAR" 2>/dev/null || true
+	fi
+	echo "Running as $(whoami); privileged ops via sudo."
 }
 
 yum_installs()
@@ -403,13 +435,13 @@ yum_installs()
 
 	if [ "$YUM_INSTALLED" -gt "0" ]; then
 		if [ "$CURL_INSTALLED" -eq "0" ]; then
-			yum -y install gcc
+			run_priv yum -y install gcc
 		fi
 		if [ "$GIT_INSTALLED" -eq "0" ]; then
-			yum -y install git
+			run_priv yum -y install git
 		fi
 		if [ "$BC_INSTALLED" -eq "0" ]; then
-			yum -y install bc
+			run_priv yum -y install bc
 		fi
 	else
 		if [ "$CURL_INSTALLED" -eq "0" ]; then
@@ -452,8 +484,8 @@ repo_init()
 			echo ""
 			echo "Creating install dir"
 			echo "-------------------------------------------------------------------------"
-			mkdir $INSTALL_DIR
-			chown $ADMIN_USER $INSTALL_DIR
+			run_priv mkdir -p $INSTALL_DIR
+			run_priv chown $ADMIN_USER $INSTALL_DIR
 		fi
 	fi
 
@@ -470,31 +502,48 @@ repo_init()
 			echo ""
 			echo "Creating $REPO directory (branch: $REPO_BRANCH)"
 			echo "-------------------------------------------------------------------------"
-			mkdir $INSTALL_DIR/$REPO
-			chown $ADMIN_USER $INSTALL_DIR/$REPO
-			su -c "cd $INSTALL_DIR; GIT_SSL_NO_VERIFY=true git clone --depth=1 -b $REPO_BRANCH $REPO_URL" $ADMIN_USER
+			run_priv mkdir -p $INSTALL_DIR/$REPO
+			run_priv chown $ADMIN_USER $INSTALL_DIR/$REPO
+			as_admin "cd $INSTALL_DIR; GIT_SSL_NO_VERIFY=true git clone --depth=1 -b $REPO_BRANCH $REPO_URL"
 		fi
 	else
-		chown -R $ADMIN_USER $INSTALL_DIR/$REPO
+		# Do not steal the operator's clone (e.g. luka); only fix ownership if not writable.
+		if [ ! -w "$INSTALL_DIR/$REPO" ]; then
+			echo "Fixing permissions on $INSTALL_DIR/$REPO for $(id -un)..."
+			run_priv chown -R "$(id -un)" "$INSTALL_DIR/$REPO"
+		fi
 
 		# Не сбрасываем локальные коммиты (никакого reset --hard / checkout -B origin/...).
 		# 1) при грязном дереве — стоп; 2) иначе checkout локальной REPO_BRANCH;
 		# 3) если локальной ветки нет — создать от origin/REPO_BRANCH.
 		local dirty
-		dirty=$(su -c "cd \"$INSTALL_DIR/$REPO\" && git status --porcelain" $ADMIN_USER 2>/dev/null | wc -l)
+		if [ -w "$INSTALL_DIR/$REPO" ]; then
+			dirty=$(cd "$INSTALL_DIR/$REPO" && git status --porcelain 2>/dev/null | wc -l)
+		else
+			dirty=$(as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --porcelain" 2>/dev/null | wc -l)
+		fi
 		if [ "$dirty" -gt "0" ]; then
 			echo "ERROR: repository $INSTALL_DIR/$REPO has uncommitted changes."
 			echo "Please commit (or stash) them before running tpc.sh, then re-run."
 			echo ""
-			su -c "cd \"$INSTALL_DIR/$REPO\" && git status --short" $ADMIN_USER || true
+			if [ -w "$INSTALL_DIR/$REPO" ]; then
+				(cd "$INSTALL_DIR/$REPO" && git status --short) || true
+			else
+				as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --short" || true
+			fi
 			exit 1
 		fi
 
-		if [ "$internet_down" -eq "0" ]; then
-			su -c "cd \"$INSTALL_DIR/$REPO\"; GIT_SSL_NO_VERIFY=true git fetch origin $REPO_BRANCH || true" $ADMIN_USER || true
+		_repo_git() { as_admin "cd \"$INSTALL_DIR/$REPO\"; $1"; }
+		if [ -w "$INSTALL_DIR/$REPO" ]; then
+			_repo_git() { bash -lc "cd \"$INSTALL_DIR/$REPO\"; $1"; }
 		fi
 
-		su -c "cd \"$INSTALL_DIR/$REPO\"; \
+		if [ "$internet_down" -eq "0" ]; then
+			_repo_git "GIT_SSL_NO_VERIFY=true git fetch origin $REPO_BRANCH || true" || true
+		fi
+
+		_repo_git "\
 			if git rev-parse --verify $REPO_BRANCH >/dev/null 2>&1; then \
 				echo \"Checking out local branch $REPO_BRANCH (keeping local commits)\"; \
 				git checkout $REPO_BRANCH; \
@@ -505,7 +554,8 @@ repo_init()
 				echo \"ERROR: branch $REPO_BRANCH not found locally or on origin\"; \
 				exit 1; \
 			fi; \
-			echo \"Now on branch: \$(git rev-parse --abbrev-ref HEAD) @ \$(git rev-parse --short HEAD)\"" $ADMIN_USER
+			echo \"Now on branch: \$(git rev-parse --abbrev-ref HEAD) @ \$(git rev-parse --short HEAD)\""
+		unset -f _repo_git
 	fi
 }
 
@@ -603,9 +653,9 @@ _tpcds_kill_tree()
 	for child in $(pgrep -P "$pid" 2>/dev/null); do
 		_tpcds_kill_tree "$child" "$sig"
 	done
-	if kill -0 "$pid" 2>/dev/null; then
+	if kill -0 "$pid" 2>/dev/null || run_priv kill -0 "$pid" 2>/dev/null; then
 		echo "  kill -$sig $pid: $(ps -p "$pid" -o args= 2>/dev/null | head -c 160)"
-		kill "-$sig" "$pid" 2>/dev/null || true
+		kill "-$sig" "$pid" 2>/dev/null || run_priv kill "-$sig" "$pid" 2>/dev/null || true
 	fi
 }
 
@@ -640,6 +690,8 @@ kill_previous_processes()
 			pgrep -f "[.]/tpc\\.sh" 2>/dev/null || true
 			pgrep -f "psql .*-f ${repo}/" 2>/dev/null || true
 			pgrep -f "su -l .*${repo}.*rollout\\.sh" 2>/dev/null || true
+			pgrep -f "sudo .*-u .*${repo}.*rollout\\.sh" 2>/dev/null || true
+			pgrep -f "bash -lc .*${repo}.*rollout\\.sh" 2>/dev/null || true
 		} | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -u
 	)
 
@@ -662,14 +714,14 @@ kill_previous_processes()
 		if _tpcds_is_self_or_ancestor "$pid"; then
 			continue
 		fi
-		if kill -0 "$pid" 2>/dev/null; then
+		if kill -0 "$pid" 2>/dev/null || run_priv kill -0 "$pid" 2>/dev/null; then
 			_tpcds_kill_tree "$pid" KILL
 		fi
 	done
 
 	if command -v psql >/dev/null 2>&1 && [ -n "${DBNAME:-}" ] && [ -n "${ADMIN_USER:-}" ]; then
 		echo "Terminating leftover client backends in database $DBNAME..."
-		su -l "$ADMIN_USER" -c "psql -d \"$DBNAME\" -v ON_ERROR_STOP=0 -q -c \"
+		as_admin "psql -d \"$DBNAME\" -v ON_ERROR_STOP=0 -q -c \"
 SELECT pg_terminate_backend(pid) AS terminated, pid, left(query, 80) AS query
 FROM pg_stat_activity
 WHERE datname = current_database()
@@ -686,17 +738,17 @@ make_prerequisites()
 {
 	
 	echo "Setting mtu 9000 on all hosts..."
-	su -l $ADMIN_USER -c "gpssh -f /home/gpadmin/arenadata_configs/arenadata_all_hosts.hosts -v -e 'sudo ip link set mtu 9000 dev $NETWORK_INTERFACE_JUMBOFRAME'"
+	as_admin "gpssh -f /home/gpadmin/arenadata_configs/arenadata_all_hosts.hosts -v -e 'sudo ip link set mtu 9000 dev $NETWORK_INTERFACE_JUMBOFRAME'"
 
 	echo "Checking if cluster is started..."
-	IS_CLUSTER_STARTED=$(su -l "$ADMIN_USER" -c "gpstate -e | grep 'All segments are running normally'" | wc -l)
+	IS_CLUSTER_STARTED=$(as_admin "gpstate -e | grep 'All segments are running normally'" | wc -l)
         echo "IS_CLUSTER_STARTED = $IS_CLUSTER_STARTED"
 
         if [[ "$IS_CLUSTER_STARTED" == "0" ]]; then
 
                 echo "Cluster is stopped. Starting the cluster..."
 		echo "gpstart -a"
-                su -l $ADMIN_USER -c "gpstart -a"
+                as_admin "gpstart -a"
         fi
 
 }
@@ -770,7 +822,7 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-su -l $ADMIN_USER -c "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\""
+as_admin "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPCDS $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EXTRA_TPCDS_SCHEMAS $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\""
 
 # Final marker for tpc.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).

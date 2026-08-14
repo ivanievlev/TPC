@@ -27,11 +27,13 @@ TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (p
 ## Installation
 
 ```
-sudo su
-mkdir /arenadata; cd /arenadata
-git clone https://github.com/ivanievlev/TPC-DS.git
-cd TPC-DS/
+mkdir -p /arenadata; cd /arenadata
+git clone https://github.com/ivanievlev/TPC.git
+cd TPC/
 chmod 777 $(find /arenadata -type d)
+
+# Run as a normal user with passwordless sudo (sudo -n true). Do not run as root /
+# via sudo ./tpc.sh — the script refuses root and uses sudo only for privileged steps.
 
 <preliminary run to get paramater file>
 nohup ./tpc.sh > tpc.log 2>&1 < tpc.log &
