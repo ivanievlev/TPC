@@ -9,9 +9,9 @@ TPC_MODE="TPC-DS"   # default — tpcds/00_compile_tpcds … tpcds/09_score
 TPC_MODE="TPC-H"    # tpch/00_compile_tpch … tpch/09_score
 ```
 
-Shared knobs in `tpc_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, …) apply to **both** modes. Entry point: `./tpc.sh`.
+Shared knobs in `tpc_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, `COLLECT_PROMETHEUS_DATA`, …) apply to **both** modes. Entry point: `./tpc.sh`.
 
-TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H.
+TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score also reports DAT/TBL size, DB or external storage size, 05/07 query success rates, and (when `COLLECT_PROMETHEUS_DATA=true`) Prometheus CPU/RAM/network/disk averages for those steps.
 
 ---
 
@@ -216,6 +216,17 @@ Step logs go into subdirectories of `log/`:
 	At the start of the run, if RUN_SQL_WITH_DUCKDB="true", the script ensures database DBNAME exists,
 	checks pg_extension, and runs CREATE EXTENSION IF NOT EXISTS pg_duckdb when missing.
 	Fails only if CREATE EXTENSION itself fails (package/shared library not installed on the server).``
+
+- COLLECT_PROMETHEUS_DATA="true"
+
+	``Default "true": at run start, verify Prometheus is reachable at PROMETHEUS_URL (default http://127.0.0.1:9090).
+	If unreachable, the run fails. When true, step 09_score also prints avg CPU %, avg RAM used GB,
+	avg network MB/s, and avg disk used GB for the 05_sql and 07_multi_user time windows (node_exporter metrics).
+	Set to "false" to skip the check and omit Prometheus rows from the score report.``
+
+- PROMETHEUS_URL="http://127.0.0.1:9090"
+
+	``Base URL for Prometheus HTTP API used when COLLECT_PROMETHEUS_DATA=true.``
 
 - DUCKDB_MEMORY_LIMIT="4GB"
 
