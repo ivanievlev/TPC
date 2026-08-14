@@ -255,5 +255,7 @@ while IFS= read -r i; do
 		continue
 	fi
 	echo "$i/rollout.sh"
-	$i/rollout.sh $STEP_ARGS "$SKIP_QUERIES_LIST"
+	# Close stdin so step scripts (ssh, tools, etc.) cannot consume the step list
+	# from this while-read loop (classic bash pitfall).
+	$i/rollout.sh $STEP_ARGS "$SKIP_QUERIES_LIST" </dev/null
 done < <(tpc_step_dirs "$PWD")
