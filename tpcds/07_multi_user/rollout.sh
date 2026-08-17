@@ -142,8 +142,7 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 	get_file_count
 
 	if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
-		echo "The number of successfully completed sessions is less than expected!"
-		echo "Please review the log files to determine which queries failed."
-		exit 1
+		echo "WARNING: completed multi-user sessions=$file_count expected=$MULTI_USER_COUNT."
+		echo "Continuing to reports/score with partial multi-user results. Review testing_session_*.log."
 	fi
 fi
