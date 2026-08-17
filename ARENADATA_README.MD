@@ -9,9 +9,9 @@ TPC_MODE="TPC-DS"   # default — tpcds/00_compile_tpcds … tpcds/09_score
 TPC_MODE="TPC-H"    # tpch/00_compile_tpch … tpch/09_score
 ```
 
-Shared knobs in `tpc_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, `COLLECT_PROMETHEUS_DATA`, …) apply to **both** modes. Entry point: `./tpc.sh`.
+Shared knobs in `tpc_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, `COLLECT_OS_DATA`, …) apply to **both** modes. Entry point: `./tpc.sh`.
 
-TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score also reports DAT/TBL size, DB or external storage size, 05/07 query success rates, and (when `COLLECT_PROMETHEUS_DATA=true`) Prometheus CPU/RAM/network/disk averages for those steps.
+TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score also reports DAT/TBL size, DB or external storage size, 05/07 query success rates, and (when `COLLECT_OS_DATA=true`) local OS CPU/RAM/network/disk averages for those steps.
 
 ---
 
@@ -52,8 +52,9 @@ The end. All TPC-DS steps completed
 (or All TPC-H steps completed, depending on TPC_MODE)
 
 A timestamped copy of `tpc.log` is also saved under `log/archived_results/`:
-`tpcds_SF<scale>_<format>[_with-duckdb]_<YYYYMMDD_HHMMSS>.log` (or `tpch_…`)
+`<YYYYMMDD_HHMMSS>_tpcds_SF<scale>_<format>[_with-duckdb].log` (or `tpch_…`)
 (`format` is `heap`, or `parquet`/`csv`/`json`; `_with-duckdb` only when `RUN_SQL_WITH_DUCKDB=true`).
+Timestamp-first naming sorts chronologically for later analysis.
 
 Step logs go into subdirectories of `log/`:
 - `log/end_testing_log/end_testing_*.log`
@@ -217,16 +218,16 @@ Step logs go into subdirectories of `log/`:
 	checks pg_extension, and runs CREATE EXTENSION IF NOT EXISTS pg_duckdb when missing.
 	Fails only if CREATE EXTENSION itself fails (package/shared library not installed on the server).``
 
-- COLLECT_PROMETHEUS_DATA="true"
+- COLLECT_OS_DATA="true"
 
-	``Default "true": at run start, only checks that Prometheus answers at PROMETHEUS_URL (the harness never starts Prometheus).
-	If unreachable, the run fails. When true, step 09_score also prints avg CPU %, avg RAM used GB,
-	avg network MB/s, and avg disk used GB for the 05_sql and 07_multi_user time windows (node_exporter metrics).
-	Set to "false" to skip the check and omit Prometheus rows from the score report.``
+	``Default "true": starts a local OS metrics collector for the duration of the run (no Prometheus / exporters required).
+	Samples CPU, RAM, network, and disk into log/os_metrics.csv. Step 09_score averages those samples over the
+	05_sql and 07_multi_user time windows. Set to "false" to skip collection and omit OS metric rows from the score.``
 
-- PROMETHEUS_URL="http://127.0.0.1:9090"
+- COLLECT_DATA_PERIOD="5s"
 
-	``HTTP base URL of an already-running Prometheus (e.g. http://monitoring.example:9090). Required when COLLECT_PROMETHEUS_DATA=true.``
+	``Sampling interval for the OS metrics collector when COLLECT_OS_DATA=true. Same duration syntax as STATEMENT_TIMEOUT
+	(e.g. "1s", "5s", "1min", "1m", "2h"). Values below 1 second are rounded up to 1s. Default "5s".``
 
 - DUCKDB_MEMORY_LIMIT="4GB"
 

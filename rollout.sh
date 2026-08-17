@@ -54,20 +54,20 @@ DUCKDB_MEMORY_LIMIT="${45}"
 DUCKDB_THREADS="${46}"
 DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="${47}"
 DUCKDB_THREADS_FOR_POSTGRES_SCAN="${48}"
-COLLECT_PROMETHEUS_DATA="${49:-true}"
-PROMETHEUS_URL="${50:-http://127.0.0.1:9090}"
+COLLECT_OS_DATA="${49:-true}"
+COLLECT_DATA_PERIOD="${50:-5s}"
 SKIP_QUERIES_LIST="${51}"
 TPC_MODE="${52:-TPC-DS}"
 
 init_tpc_mode
 
-if [ -z "$COLLECT_PROMETHEUS_DATA" ]; then
-	COLLECT_PROMETHEUS_DATA="true"
+if [ -z "$COLLECT_OS_DATA" ]; then
+	COLLECT_OS_DATA="true"
 fi
-if [ -z "$PROMETHEUS_URL" ]; then
-	PROMETHEUS_URL="http://127.0.0.1:9090"
+if [ -z "$COLLECT_DATA_PERIOD" ]; then
+	COLLECT_DATA_PERIOD="5s"
 fi
-export COLLECT_PROMETHEUS_DATA PROMETHEUS_URL
+export COLLECT_OS_DATA COLLECT_DATA_PERIOD
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPC" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SQL" == "" || "$RUN_SINGLE_USER_REPORT" == "" || "$RUN_MULTI_USER" == "" || "$RUN_MULTI_USER_REPORT" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
 	echo "Please run this script from tpc.sh so the correct parameters are passed to it."
@@ -106,11 +106,11 @@ fi
 if [ -z "$DUCKDB_THREADS_FOR_POSTGRES_SCAN" ]; then
 	DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
 fi
-if [ -z "$COLLECT_PROMETHEUS_DATA" ]; then
-	COLLECT_PROMETHEUS_DATA="true"
+if [ -z "$COLLECT_OS_DATA" ]; then
+	COLLECT_OS_DATA="true"
 fi
-if [ -z "$PROMETHEUS_URL" ]; then
-	PROMETHEUS_URL="http://127.0.0.1:9090"
+if [ -z "$COLLECT_DATA_PERIOD" ]; then
+	COLLECT_DATA_PERIOD="5s"
 fi
 if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
 	SKIP_QUERIES_LIST=""
@@ -179,14 +179,6 @@ if [ "$RUN_SQL_WITH_DUCKDB" = "true" ]; then
 	fi
 fi
 
-# Prometheus availability: never start it — only probe PROMETHEUS_URL
-if [ "$COLLECT_PROMETHEUS_DATA" = "true" ]; then
-	echo "Checking Prometheus at PROMETHEUS_URL=$PROMETHEUS_URL ..."
-	# shellcheck source=score_helpers.sh
-	source "$PWD/score_helpers.sh"
-	check_prometheus_available || exit 1
-fi
-
 create_directories()
 {
 	if [ ! -d $LOCAL_PWD/log ]; then
@@ -196,6 +188,15 @@ create_directories()
 }
 
 create_directories
+
+# Local OS metrics sampler (no Prometheus). Runs for the whole rollout when enabled.
+# shellcheck source=score_helpers.sh
+source "$PWD/score_helpers.sh"
+if [ "$COLLECT_OS_DATA" = "true" ]; then
+	start_os_metrics_collector || exit 1
+	trap 'stop_os_metrics_collector' EXIT
+fi
+
 echo "############################################################################"
 echo "${TPC_BENCH_LABEL} Script (unified TPC harness)."
 echo "############################################################################"
@@ -221,8 +222,8 @@ echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"
 echo "EXCLUDE_HEAVY_QUERIES: $EXCLUDE_HEAVY_QUERIES"
 echo "SKIP_QUERIES_LIST: $SKIP_QUERIES_LIST"
 echo "EMPTY_SCHEMAS_CNT: $EMPTY_SCHEMAS_CNT"
-echo "COLLECT_PROMETHEUS_DATA: $COLLECT_PROMETHEUS_DATA"
-echo "PROMETHEUS_URL: $PROMETHEUS_URL"
+echo "COLLECT_OS_DATA: $COLLECT_OS_DATA"
+echo "COLLECT_DATA_PERIOD: $COLLECT_DATA_PERIOD"
 echo "TRUNCATE_BEFORE_LOAD: $TRUNCATE_BEFORE_LOAD"
 echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT: $STATEMENT_TIMEOUT"
@@ -285,7 +286,7 @@ step_run_flag()
 	esac
 }
 
-STEP_ARGS="$GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $REFERENCE_TABLE_TYPE $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_PROMETHEUS_DATA $PROMETHEUS_URL"
+STEP_ARGS="$GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $REFERENCE_TABLE_TYPE $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_OS_DATA $COLLECT_DATA_PERIOD"
 
 while IFS= read -r i; do
 	[ -z "$i" ] && continue

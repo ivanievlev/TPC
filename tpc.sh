@@ -362,14 +362,23 @@ check_variables()
 		echo "DUCKDB_THREADS_FOR_POSTGRES_SCAN=\"2\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
-	local count=$(grep "COLLECT_PROMETHEUS_DATA" $MYVAR | wc -l)
-	if [ "$count" -eq "0" ]; then
-		echo "COLLECT_PROMETHEUS_DATA=\"true\"" >> $MYVAR
+	# Migrate Prometheus knobs → local OS collector
+	if grep -q '^COLLECT_PROMETHEUS_DATA=' "$MYVAR" 2>/dev/null && ! grep -q '^COLLECT_OS_DATA=' "$MYVAR" 2>/dev/null; then
+		sed -i 's/^COLLECT_PROMETHEUS_DATA=/COLLECT_OS_DATA=/' "$MYVAR"
 		new_variable=$(($new_variable + 1))
 	fi
-	local count=$(grep "PROMETHEUS_URL" $MYVAR | wc -l)
+	if grep -q '^PROMETHEUS_URL=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^PROMETHEUS_URL=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "COLLECT_OS_DATA" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "PROMETHEUS_URL=\"http://127.0.0.1:9090\"" >> $MYVAR
+		echo "COLLECT_OS_DATA=\"true\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "COLLECT_DATA_PERIOD" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "COLLECT_DATA_PERIOD=\"5s\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 
@@ -651,8 +660,8 @@ echo_variables()
 	echo "DUCKDB_THREADS: $DUCKDB_THREADS"
 	echo "DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN: $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN"
 	echo "DUCKDB_THREADS_FOR_POSTGRES_SCAN: $DUCKDB_THREADS_FOR_POSTGRES_SCAN"
-	echo "COLLECT_PROMETHEUS_DATA: $COLLECT_PROMETHEUS_DATA"
-	echo "PROMETHEUS_URL: $PROMETHEUS_URL"
+	echo "COLLECT_OS_DATA: $COLLECT_OS_DATA"
+	echo "COLLECT_DATA_PERIOD: $COLLECT_DATA_PERIOD"
 	echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
 	echo "KILL_PREVIOUS_PROCESSES: $KILL_PREVIOUS_PROCESSES"
 	echo "############################################################################"
@@ -829,7 +838,7 @@ archive_tpcds_log()
 	log_dir="$INSTALL_DIR/$REPO/log/archived_results"
 	mkdir -p "$log_dir"
 	ts=$(date +%Y%m%d_%H%M%S)
-	dest="$log_dir/${prefix}_SF${GEN_DATA_SCALE}_${format}${duck_suffix}_${ts}.log"
+	dest="$log_dir/${ts}_${prefix}_SF${GEN_DATA_SCALE}_${format}${duck_suffix}.log"
 
 	src=""
 	if [ -f "$INSTALL_DIR/$REPO/tpc.log" ]; then
@@ -874,7 +883,7 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-as_admin "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPC $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_PROMETHEUS_DATA \"$PROMETHEUS_URL\" \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\""
+as_admin "cd \"$INSTALL_DIR/$REPO\"; ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPC $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_EACH_SINGLE_QUERY $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_OS_DATA \"$COLLECT_DATA_PERIOD\" \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\""
 
 # Final marker for tpc.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).

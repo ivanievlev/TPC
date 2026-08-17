@@ -124,94 +124,190 @@ FROM ${schema}.${table};
 " 2>/dev/null | tr -d '[:space:]'
 }
 
-check_prometheus_available()
+# Parse duration like STATEMENT_TIMEOUT: 5s, 1min, 1m, 2h, 500ms → integer seconds (>=1).
+parse_duration_to_seconds()
 {
-	local url="${PROMETHEUS_URL:-}"
-	url=${url%/}
-	if [ -z "$url" ]; then
-		echo "ERROR: COLLECT_PROMETHEUS_DATA=true but PROMETHEUS_URL is empty."
-		echo "Set PROMETHEUS_URL to the Prometheus HTTP base (e.g. http://prom.example:9090)."
+	local raw unit num secs
+	raw=$(echo "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+	if [ -z "$raw" ]; then
+		echo ""
 		return 1
 	fi
-	if ! command -v curl >/dev/null 2>&1; then
-		echo "ERROR: COLLECT_PROMETHEUS_DATA=true but curl is not installed."
+	if [[ "$raw" =~ ^([0-9]+)(us|µs|ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)?$ ]]; then
+		num="${BASH_REMATCH[1]}"
+		unit="${BASH_REMATCH[2]:-s}"
+	else
+		echo ""
 		return 1
 	fi
-	local code
-	code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 "$url/-/ready" 2>/dev/null || true)
-	[ -z "$code" ] && code="000"
-	if [ "$code" != "200" ]; then
-		code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 "$url/api/v1/status/buildinfo" 2>/dev/null || true)
-		[ -z "$code" ] && code="000"
-	fi
-	if [ "$code" != "200" ]; then
-		echo "ERROR: COLLECT_PROMETHEUS_DATA=true but Prometheus is not reachable at PROMETHEUS_URL=$url (HTTP $code)."
-		echo "Fix PROMETHEUS_URL or set COLLECT_PROMETHEUS_DATA=false."
-		return 1
-	fi
-	echo "Prometheus OK at PROMETHEUS_URL=$url"
+	case "$unit" in
+		us|µs) secs=1 ;; # sub-second → floor to 1s
+		ms) if [ "$num" -lt 1000 ]; then secs=1; else secs=$((num / 1000)); fi ;;
+		s|sec|secs|second|seconds) secs=$num ;;
+		m|min|mins|minute|minutes) secs=$((num * 60)) ;;
+		h|hr|hrs|hour|hours) secs=$((num * 3600)) ;;
+		d|day|days) secs=$((num * 86400)) ;;
+		*) echo ""; return 1 ;;
+	esac
+	[ "$secs" -lt 1 ] && secs=1
+	echo "$secs"
 	return 0
 }
 
-# avg_over_time of an instant-vector expression over [start,end] via Prometheus API.
-# Prints numeric value or "n/a"
-prometheus_avg_over_window()
+os_metrics_log_path()
 {
-	local expr="$1"
-	local start_u="$2"
-	local end_u="$3"
-	local url="${PROMETHEUS_URL:-}"
-	url=${url%/}
-	if [ -z "$url" ]; then
-		echo "n/a"
-		return 0
+	local root="${LOCAL_PWD:-}"
+	if [ -z "$root" ]; then
+		if [ -d "$PWD/log" ]; then
+			root="$PWD"
+		else
+			root="$PWD/../.."
+		fi
 	fi
-	local window=$((end_u - start_u))
-	[ "$window" -lt 1 ] && window=1
-	# Evaluate at end time with lookbehind window
-	local query="avg_over_time(($expr)[${window}s:])"
-	local json val
-	json=$(curl -sgG --connect-timeout 5 --max-time 30 "$url/api/v1/query" \
-		--data-urlencode "query=$query" \
-		--data-urlencode "time=$end_u" 2>/dev/null || true)
-	val=$(printf '%s' "$json" | python3 -c '
-import json,sys
-try:
-    d=json.load(sys.stdin)
-    r=d.get("data",{}).get("result",[])
-    if not r:
-        print("n/a"); sys.exit(0)
-    v=r[0]["value"][1]
-    print(v)
-except Exception:
-    print("n/a")
-' 2>/dev/null || echo "n/a")
-	echo "$val"
+	echo "$root/log/os_metrics.csv"
 }
 
-score_prometheus_for_window()
+os_metrics_pid_path()
+{
+	local root="${LOCAL_PWD:-}"
+	if [ -z "$root" ]; then
+		if [ -d "$PWD/log" ]; then
+			root="$PWD"
+		else
+			root="$PWD/../.."
+		fi
+	fi
+	echo "$root/log/os_metrics_collector.pid"
+}
+
+stop_os_metrics_collector()
+{
+	local pidfile pid
+	pidfile=$(os_metrics_pid_path)
+	if [ -f "$pidfile" ]; then
+		pid=$(tr -d '[:space:]' < "$pidfile")
+		if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+			kill "$pid" 2>/dev/null || true
+			# Give it a moment; then force
+			sleep 0.2 2>/dev/null || true
+			kill -9 "$pid" 2>/dev/null || true
+		fi
+		rm -f "$pidfile"
+	fi
+	# Best-effort: any leftover collector writing our outfile
+	pkill -f "os_metrics_collector.sh $(os_metrics_log_path)" 2>/dev/null || true
+}
+
+start_os_metrics_collector()
+{
+	local period_raw="${COLLECT_DATA_PERIOD:-5s}"
+	local period_sec outfile pidfile script_dir collector
+	period_sec=$(parse_duration_to_seconds "$period_raw") || true
+	if [ -z "$period_sec" ]; then
+		echo "ERROR: COLLECT_OS_DATA=true but COLLECT_DATA_PERIOD='$period_raw' is not a valid duration (e.g. 5s, 1min, 1m, 2h)."
+		return 1
+	fi
+	outfile=$(os_metrics_log_path)
+	pidfile=$(os_metrics_pid_path)
+	mkdir -p "$(dirname "$outfile")"
+
+	stop_os_metrics_collector
+
+	script_dir="${LOCAL_PWD:-$PWD}"
+	collector="$script_dir/os_metrics_collector.sh"
+	if [ ! -x "$collector" ] && [ -f "$collector" ]; then
+		chmod +x "$collector" 2>/dev/null || true
+	fi
+	if [ ! -f "$collector" ]; then
+		echo "ERROR: os_metrics_collector.sh not found at $collector"
+		return 1
+	fi
+
+	echo "Starting OS metrics collector (period=${period_raw} → ${period_sec}s) → $outfile"
+	nohup "$collector" "$outfile" "$period_sec" >/dev/null 2>&1 &
+	echo $! > "$pidfile"
+	# Confirm it stayed up
+	sleep 0.3 2>/dev/null || sleep 1
+	if ! kill -0 "$(tr -d '[:space:]' < "$pidfile")" 2>/dev/null; then
+		echo "ERROR: OS metrics collector failed to start."
+		rm -f "$pidfile"
+		return 1
+	fi
+	echo "OS metrics collector PID $(tr -d '[:space:]' < "$pidfile")"
+	return 0
+}
+
+# Average OS samples in [start_u, end_u] from os_metrics.csv.
+# Prints four lines: cpu_pct ram_gb net_mbs disk_gb (or n/a)
+os_metrics_avg_over_window()
+{
+	local start_u="$1"
+	local end_u="$2"
+	local outfile
+	outfile=$(os_metrics_log_path)
+	if [ ! -f "$outfile" ] || [ -z "$start_u" ] || [ -z "$end_u" ]; then
+		echo "n/a n/a n/a n/a"
+		return 0
+	fi
+	python3 - "$outfile" "$start_u" "$end_u" <<'PY'
+import sys
+path, start_s, end_s = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+rows = []
+with open(path) as f:
+    for line in f:
+        parts = line.split()
+        if len(parts) < 7:
+            continue
+        try:
+            ts = int(parts[0])
+            idle = float(parts[1]); total = float(parts[2])
+            mem = float(parts[3]); rx = float(parts[4]); tx = float(parts[5])
+            disk = float(parts[6])
+        except ValueError:
+            continue
+        if start_s <= ts <= end_s:
+            rows.append((ts, idle, total, mem, rx, tx, disk))
+if len(rows) < 1:
+    print("n/a n/a n/a n/a")
+    sys.exit(0)
+
+# CPU: mean of per-interval busy% between consecutive samples
+cpu_vals = []
+for i in range(1, len(rows)):
+    di = rows[i][1] - rows[i-1][1]
+    dt = rows[i][2] - rows[i-1][2]
+    if dt > 0:
+        busy = 100.0 * (1.0 - di / dt)
+        if busy < 0: busy = 0.0
+        if busy > 100: busy = 100.0
+        cpu_vals.append(busy)
+cpu = sum(cpu_vals) / len(cpu_vals) if cpu_vals else None
+
+ram_gb = sum(r[3] for r in rows) / len(rows) / (1024**3)
+disk_gb = sum(r[6] for r in rows) / len(rows) / (1024**3)
+
+net = None
+if len(rows) >= 2:
+    dts = rows[-1][0] - rows[0][0]
+    if dts > 0:
+        dbytes = (rows[-1][4] + rows[-1][5]) - (rows[0][4] + rows[0][5])
+        if dbytes < 0:
+            dbytes = 0
+        net = dbytes / dts / (1024 * 1024)
+
+def fmt(v):
+    return "n/a" if v is None else f"{v:.6f}"
+
+print(fmt(cpu), fmt(ram_gb), fmt(net), fmt(disk_gb))
+PY
+}
+
+score_os_metrics_for_window()
 {
 	local label="$1"
 	local start_u="$2"
 	local end_u="$3"
 	local cpu ram net disk
-
-	if [ -z "$start_u" ] || [ -z "$end_u" ]; then
-		printf "%-36s %14s\n" "$label CPU avg %" "n/a"
-		printf "%-36s %14s\n" "$label RAM used avg GB" "n/a"
-		printf "%-36s %14s\n" "$label Network avg MB/s" "n/a"
-		printf "%-36s %14s\n" "$label Disk used avg GB" "n/a"
-		return 0
-	fi
-
-	cpu=$(prometheus_avg_over_window '100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[1m])))' "$start_u" "$end_u")
-	ram=$(prometheus_avg_over_window '(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / 1024 / 1024 / 1024' "$start_u" "$end_u")
-	# Fallback if MemAvailable missing
-	if [ "$ram" = "n/a" ]; then
-		ram=$(prometheus_avg_over_window '(node_memory_MemTotal_bytes - node_memory_MemFree_bytes - node_memory_Buffers_bytes - node_memory_Cached_bytes) / 1024 / 1024 / 1024' "$start_u" "$end_u")
-	fi
-	net=$(prometheus_avg_over_window 'sum(rate(node_network_receive_bytes_total{device!~"lo|veth.*|docker.*"}[1m]) + rate(node_network_transmit_bytes_total{device!~"lo|veth.*|docker.*"}[1m])) / 1024 / 1024' "$start_u" "$end_u")
-	disk=$(prometheus_avg_over_window 'sum(node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}) / 1024 / 1024 / 1024' "$start_u" "$end_u")
 
 	_fmt() {
 		local v="$1"
@@ -221,6 +317,16 @@ score_prometheus_for_window()
 			printf '%.3f' "$v" 2>/dev/null || echo "$v"
 		fi
 	}
+
+	if [ -z "$start_u" ] || [ -z "$end_u" ]; then
+		printf "%-36s %14s\n" "$label CPU avg %" "n/a"
+		printf "%-36s %14s\n" "$label RAM used avg GB" "n/a"
+		printf "%-36s %14s\n" "$label Network avg MB/s" "n/a"
+		printf "%-36s %14s\n" "$label Disk used avg GB" "n/a"
+		return 0
+	fi
+
+	read -r cpu ram net disk < <(os_metrics_avg_over_window "$start_u" "$end_u")
 
 	printf "%-36s %14s\n" "$label CPU avg %" "$(_fmt "$cpu")"
 	printf "%-36s %14s\n" "$label RAM used avg GB" "$(_fmt "$ram")"
@@ -255,20 +361,20 @@ print_extended_score_metrics()
 	printf "%-36s %14s\n" "05_sql success %" "$pct05"
 	printf "%-36s %14s\n" "07_multi_user success %" "$pct07"
 
-	if [ "${COLLECT_PROMETHEUS_DATA:-true}" = "true" ]; then
+	if [ "${COLLECT_OS_DATA:-true}" = "true" ]; then
 		echo ""
-		printf "%-36s %14s\n" "---- Prometheus (05_sql) ----" ""
+		printf "%-36s %14s\n" "---- OS metrics (05_sql) ----" ""
 		pair05=$(score_read_end_log_range "${LOCAL_PWD:-$PWD/../..}/log/end_sql.log")
 		[ -z "$pair05" ] && pair05=$(score_read_end_log_range "$PWD/../../log/end_sql.log")
 		s05=$(echo "$pair05" | awk '{print $1}')
 		e05=$(echo "$pair05" | awk '{print $2}')
-		score_prometheus_for_window "05" "$s05" "$e05"
+		score_os_metrics_for_window "05" "$s05" "$e05"
 
 		echo ""
-		printf "%-36s %14s\n" "---- Prometheus (07_multi) ----" ""
+		printf "%-36s %14s\n" "---- OS metrics (07_multi) ----" ""
 		pair07=$(score_multi_user_time_range)
 		s07=$(echo "$pair07" | awk '{print $1}')
 		e07=$(echo "$pair07" | awk '{print $2}')
-		score_prometheus_for_window "07" "$s07" "$e07"
+		score_os_metrics_for_window "07" "$s07" "$e07"
 	fi
 }
