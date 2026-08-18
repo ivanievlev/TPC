@@ -1,39 +1,60 @@
+# Unified TPC harness (TPC-DS + TPC-H)
+
+`REPO="TPC"` / `REPO_URL="https://github.com/ivanievlev/TPC"`
+
+Select the benchmark with:
+
+```bash
+TPC_MODE="TPC-DS"   # default — tpcds/00_compile_tpcds … tpcds/09_score
+TPC_MODE="TPC-H"    # tpch/00_compile_tpch … tpch/09_score
+```
+
+Shared knobs in `tpc_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, `COLLECT_OS_DATA`, …) apply to **both** modes. Entry point: `./tpc.sh`.
+
+TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score also reports DAT/TBL size, DB or external storage size, 05/07 query success rates, and (when `COLLECT_OS_DATA=true`) local OS CPU/RAM/network/disk averages for those steps.
+
+---
+
 # Arenadata version of TPC-DS
 ## Changes:
 
 - Added support for Greenplum 7.x 
 - Changed compression options from quicklz to zstd
 - Added new parameters
-- Added `REPO_BRANCH` parameter to select the git branch used by `tpcds.sh` (default: `master`)
+- Added `REPO_BRANCH` parameter to select the git branch used by `tpc.sh` (default: `master`)
 - Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN`, `DUCKDB_THREADS_FOR_POSTGRES_SCAN`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`, `SKIP_QUERIES_LIST`
 
 ## Installation
 
 ```
-sudo su
-mkdir /arenadata; cd /arenadata
-git clone https://github.com/ivanievlev/TPC-DS.git
-cd TPC-DS/
+mkdir -p /arenadata; cd /arenadata
+git clone https://github.com/ivanievlev/TPC.git
+cd TPC/
 chmod 777 $(find /arenadata -type d)
 
+# Run as a normal user with passwordless sudo (sudo -n true). Do not run as root /
+# via sudo ./tpc.sh — the script refuses root and uses sudo only for privileged steps.
+
 <preliminary run to get paramater file>
-nohup ./tpcds.sh > tpcds.log 2>&1 < tpcds.log &
+nohup ./tpc.sh > tpc.log 2>&1 < tpc.log &
 
 <editing parameters>
-nano tpcds_variables.sh
+nano tpc_variables.sh
 
 <main run>
-nohup ./tpcds.sh > tpcds.log 2>&1 < tpcds.log &
+nohup ./tpc.sh > tpc.log 2>&1 < tpc.log &
 
 <watching the log>
-tail -f tpcds.log 
+tail -f tpc.log 
 
 When the run finishes successfully, the last line is:
 The end. All TPC-DS steps completed
+(or All TPC-H steps completed, depending on TPC_MODE)
 
-A timestamped copy of `tpcds.log` is also saved under `log/archived_results/`:
-`tpcds_SF<scale>_<format>[_with-duckdb]_<YYYYMMDD_HHMMSS>.log`
+A timestamped copy of `tpc.log` is also saved under `log/archived_results/`:
+`<YYYYMMDD_HHMMSS>_tpcds_SF<scale>_<format>[_with-duckdb].log` (or `tpch_…`)
 (`format` is `heap`, or `parquet`/`csv`/`json`; `_with-duckdb` only when `RUN_SQL_WITH_DUCKDB=true`).
+Timestamp-first naming sorts chronologically for later analysis.
 
 Step logs go into subdirectories of `log/`:
 - `log/end_testing_log/end_testing_*.log`
@@ -56,7 +77,7 @@ Step logs go into subdirectories of `log/`:
 - MULTI_USER_COUNT="10"
 - GEN_DATA_SCALE="3000"
 - SINGLE_USER_ITERATIONS="1"
-- RUN_COMPILE_TPCDS="true"
+- RUN_COMPILE_TPC="true"
 - RUN_GEN_DATA="false"
 - RUN_INIT="false"
 - RUN_DDL="false"
@@ -90,10 +111,11 @@ Step logs go into subdirectories of `log/`:
 	Examples: SKIP_QUERIES_LIST="85" or SKIP_QUERIES_LIST="1,64,85".
 	Invalid values fail at startup: out-of-range (e.g. 164) or non-integer (e.g. n4).``
 
-- EXTRA_TPCDS_SCHEMAS="0"
+- EMPTY_SCHEMAS_CNT="0"
 
-	``It is used to create similar schemas with *blank* objects to test great data catalog. Specify number of such extra schemas.`` 
-	
+	``Number of extra schemas with the same *blank* (empty) objects as the main schema, for catalog stress tests.
+	Works for both TPC-DS and TPC-H: creates tpcds1..N or tpch1..N. Former name: EXTRA_TPCDS_SCHEMAS.``
+
 - TRUNCATE_BEFORE_LOAD="true"
 
 	``It is used to make purge faster with TRUNCATE commands instead of DELETE FROM.``
@@ -177,11 +199,11 @@ Step logs go into subdirectories of `log/`:
 
 - KILL_PREVIOUS_PROCESSES="true"
 
-	``At the start of tpcds.sh (after variables are printed), when "true" (default), find leftover
-	TPC-DS Linux processes from a previous unfinished run (tpcds.sh, rollout.sh, multi-user test.sh,
-	dsqgen, psql -f .../TPC-DS/...) and terminate them (TERM, then KILL). Also runs pg_terminate_backend
+	``At the start of tpc.sh (after variables are printed), when "true" (default), find leftover
+	TPC Linux processes from a previous unfinished run (tpc.sh, rollout.sh, multi-user test.sh,
+	dsqgen/dbgen/qgen, psql -f .../TPC/...) and terminate them (TERM, then KILL). Also runs pg_terminate_backend
 	on leftover client sessions in DBNAME so orphan queries cannot block DROP SCHEMA/DDL. The current
-	tpcds.sh and its ancestors are never killed. When "false", no process cleanup is done.``
+	tpc.sh and its ancestors are never killed. When "false", no process cleanup is done.``
 
 - RUN_SQL_WITH_DUCKDB="false"
 
@@ -192,8 +214,20 @@ Step logs go into subdirectories of `log/`:
 	with parquet/csv/json DuckDB reads the corresponding views.
 	Validation: USE_EXTERNAL_FORMAT in {parquet,csv,json} requires RUN_SQL_WITH_DUCKDB="true", otherwise the run fails with:
 	"<format> files can't be processed without DuckDB. Change format or activate DuckDB".
-	At the start of the run, if RUN_SQL_WITH_DUCKDB="true", the script checks that extension pg_duckdb is present in
-	pg_available_extensions and runs CREATE EXTENSION IF NOT EXISTS pg_duckdb; otherwise it exits with an error.``
+	At the start of the run, if RUN_SQL_WITH_DUCKDB="true", the script ensures database DBNAME exists,
+	checks pg_extension, and runs CREATE EXTENSION IF NOT EXISTS pg_duckdb when missing.
+	Fails only if CREATE EXTENSION itself fails (package/shared library not installed on the server).``
+
+- COLLECT_OS_DATA="true"
+
+	``Default "true": starts a local OS metrics collector for the duration of the run (no Prometheus / exporters required).
+	Samples CPU, RAM, network, and disk into log/os_metrics.csv. Step 09_score averages those samples over the
+	05_sql and 07_multi_user time windows. Set to "false" to skip collection and omit OS metric rows from the score.``
+
+- COLLECT_DATA_PERIOD="5s"
+
+	``Sampling interval for the OS metrics collector when COLLECT_OS_DATA=true. Same duration syntax as STATEMENT_TIMEOUT
+	(e.g. "1s", "5s", "1min", "1m", "2h"). Values below 1 second are rounded up to 1s. Default "5s".``
 
 - DUCKDB_MEMORY_LIMIT="4GB"
 

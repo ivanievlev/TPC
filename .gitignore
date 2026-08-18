@@ -3,20 +3,29 @@ log/
 *.log
 
 # Local config / runtime
+tpc_variables.sh
 tpcds_variables.sh
 segment_hosts.txt
 
-# Compiled TPC-DS tools
-00_compile_tpcds/tools/*
+# ---- TPC-DS (under tpcds/) ----
+tpcds/00_compile_tpcds/tools/*
+tpcds/01_gen_data/query_templates/
+tpcds/01_gen_data/*.sql
+tpcds/01_gen_data/*.idx
+tpcds/01_gen_data/dsqgen
+tpcds/07_multi_user/query_templates/
+tpcds/07_multi_user/*/*.sql
+tpcds/07_multi_user/dsqgen
+tpcds/07_multi_user/*.idx
+tpcds/05_sql/*.sql
 
-# Generated query tooling copies
-01_gen_data/query_templates/
-01_gen_data/*.sql
-01_gen_data/*.idx
-01_gen_data/dsqgen
-07_multi_user/query_templates/
-07_multi_user/*/*.sql
-07_multi_user/dsqgen
-07_multi_user/*.idx
-# Generated SQL
-05_sql/*.sql
+# ---- TPC-H (under tpch/) ----
+tpch/00_compile_tpch/dbgen/dbgen
+tpch/00_compile_tpch/dbgen/qgen
+tpch/00_compile_tpch/dbgen/*.o
+tpch/01_gen_data/queries/qgen
+tpch/01_gen_data/queries/dists.dss
+tpch/07_multi_user/queries/qgen
+tpch/07_multi_user/queries/dists.dss
+tpch/07_multi_user/tpch/
+tpch/05_sql/*.sql
