@@ -560,6 +560,8 @@ repo_init()
 		skip_dirty=0
 		if [ "$launch_src" != "$install_dst" ] && [ -f "$launch_src/tpc.sh" ]; then
 			skip_dirty=1
+			# Previous overlay left files owned by ADMIN_USER; take them back for git/rsync.
+			run_priv chown -R "$(id -un)" "$INSTALL_DIR/$REPO" || true
 			if [ -w "$INSTALL_DIR/$REPO" ] && [ -d "$INSTALL_DIR/$REPO/.git" ]; then
 				(cd "$INSTALL_DIR/$REPO" && git reset --hard HEAD && git clean -fd -e log -e tpc.log) >/dev/null 2>&1 || true
 			fi
@@ -639,11 +641,22 @@ overlay_launch_tree()
 			--exclude 'log/' \
 			--exclude 'tpc.log' \
 			--exclude 'segment_hosts.txt' \
+			--exclude '*.o' \
 			"$src/" "$dst/"
 	else
 		find "$src" -mindepth 1 -maxdepth 1 \
 			! -name '.git' ! -name 'log' ! -name 'tpc.log' ! -name 'segment_hosts.txt' \
 			-exec cp -a {} "$dst/" \;
+	fi
+
+	# Rollout runs as ADMIN_USER (postgres). rsync leaves files owned by the
+	# launcher, so compile's `rm -f *.o` hits "Permission denied" on the tools dir.
+	if [ -n "$ADMIN_USER" ]; then
+		echo "chown -R $ADMIN_USER $dst (keep .git for $(id -un))"
+		run_priv chown -R "$ADMIN_USER" "$dst"
+		if [ -d "$dst/.git" ]; then
+			run_priv chown -R "$(id -un)" "$dst/.git"
+		fi
 	fi
 	echo "Overlay complete."
 	echo ""
