@@ -404,6 +404,20 @@ create_hosts_file()
 	fi
 }
 
+# segment_hosts.txt is written by the compile step (create_hosts_file).
+# Missing/empty file usually means RUN_COMPILE_TPC=false, so later steps
+# skip host loops and then hang on SSH without dsdgen/dbgen copied.
+require_segment_hosts_file()
+{
+	local hosts_file="${1:-$LOCAL_PWD/segment_hosts.txt}"
+
+	if [ ! -f "$hosts_file" ] || ! grep -q '[^[:space:]]' "$hosts_file" 2>/dev/null; then
+		echo "ERROR: segment_hosts.txt is missing or empty ($hosts_file)."
+		echo "В tpc_variables.sh включите compile, чтобы появились dsdgen и segment_hosts.txt"
+		exit 1
+	fi
+}
+
 # Ensure a rollout_*.log exists and is readable for server-side COPY FROM (reports).
 # Missing files happen when the corresponding step was skipped (e.g. no compile_tpch run).
 ensure_rollout_log_for_copy()

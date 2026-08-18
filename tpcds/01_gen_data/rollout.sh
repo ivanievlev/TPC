@@ -105,6 +105,7 @@ start_log
 schema_name="tpcds"
 table_name="gen_data"
 
+require_segment_hosts_file
 kill_orphaned_data_gen
 copy_generate_data
 gen_data
