@@ -552,13 +552,26 @@ repo_init()
 		# Не сбрасываем локальные коммиты (никакого reset --hard / checkout -B origin/...).
 		# 1) при грязном дереве — стоп; 2) иначе checkout локальной REPO_BRANCH;
 		# 3) если локальной ветки нет — создать от origin/REPO_BRANCH.
+		# Если tpc.sh запущен из другого дерева (/opt/TPC), install-клон
+		# перезаписывается overlay — грязное дерево там ожидаемо.
+		local launch_src install_dst skip_dirty
+		launch_src=$(readlink -f "$PWD")
+		install_dst=$(readlink -f "$INSTALL_DIR/$REPO")
+		skip_dirty=0
+		if [ "$launch_src" != "$install_dst" ] && [ -f "$launch_src/tpc.sh" ]; then
+			skip_dirty=1
+			if [ -w "$INSTALL_DIR/$REPO" ] && [ -d "$INSTALL_DIR/$REPO/.git" ]; then
+				(cd "$INSTALL_DIR/$REPO" && git reset --hard HEAD && git clean -fd -e log -e tpc.log) >/dev/null 2>&1 || true
+			fi
+		fi
+
 		local dirty
 		if [ -w "$INSTALL_DIR/$REPO" ]; then
 			dirty=$(cd "$INSTALL_DIR/$REPO" && git status --porcelain 2>/dev/null | wc -l)
 		else
 			dirty=$(as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --porcelain" 2>/dev/null | wc -l)
 		fi
-		if [ "$dirty" -gt "0" ]; then
+		if [ "$skip_dirty" -eq 0 ] && [ "$dirty" -gt "0" ]; then
 			echo "ERROR: repository $INSTALL_DIR/$REPO has uncommitted changes."
 			echo "Please commit (or stash) them before running tpc.sh, then re-run."
 			echo ""
@@ -593,6 +606,47 @@ repo_init()
 			echo \"Now on branch: \$(git rev-parse --abbrev-ref HEAD) @ \$(git rev-parse --short HEAD)\""
 		unset -f _repo_git
 	fi
+
+	overlay_launch_tree
+}
+
+# Rollout always runs from INSTALL_DIR/REPO (e.g. /arenadata/TPC). If the
+# operator launched ./tpc.sh from another tree (e.g. /opt/TPC), copy that
+# tree over so local fixes (single-node cp instead of scp) actually run.
+overlay_launch_tree()
+{
+	local src dst
+	src=$(readlink -f "$PWD")
+	dst=$(readlink -f "$INSTALL_DIR/$REPO")
+	if [ -z "$src" ] || [ -z "$dst" ] || [ "$src" = "$dst" ]; then
+		return 0
+	fi
+	if [ ! -f "$src/tpc.sh" ] || [ ! -f "$src/functions.sh" ]; then
+		return 0
+	fi
+
+	echo "############################################################################"
+	echo "Overlay local tree: $src → $dst"
+	echo "############################################################################"
+
+	if [ -d "$dst/.git" ] && [ -w "$dst" ]; then
+		(cd "$dst" && git reset --hard HEAD && git clean -fd -e log -e tpc.log) >/dev/null 2>&1 || true
+	fi
+
+	if command -v rsync >/dev/null 2>&1; then
+		rsync -a \
+			--exclude '.git/' \
+			--exclude 'log/' \
+			--exclude 'tpc.log' \
+			--exclude 'segment_hosts.txt' \
+			"$src/" "$dst/"
+	else
+		find "$src" -mindepth 1 -maxdepth 1 \
+			! -name '.git' ! -name 'log' ! -name 'tpc.log' ! -name 'segment_hosts.txt' \
+			-exec cp -a {} "$dst/" \;
+	fi
+	echo "Overlay complete."
+	echo ""
 }
 
 script_check()
