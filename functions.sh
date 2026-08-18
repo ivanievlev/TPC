@@ -418,6 +418,185 @@ require_segment_hosts_file()
 	fi
 }
 
+# BatchMode + timeout: never prompt on TTY (background jobs hang in STAT T).
+SSH_BATCH_OPTS="-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes"
+
+# True if $1 is this machine (short name, FQDN, localhost). Single-node
+# PostgreSQL/GPDB should copy and generate locally — SSH is a cluster leftover.
+is_local_host()
+{
+	local host="$1"
+	local host_short local_short local_fqdn
+
+	[ -z "$host" ] && return 1
+	host=$(echo "$host" | tr -d '[:space:]')
+	host_short=$(echo "$host" | awk -F. '{print $1}')
+	local_short=$(hostname -s 2>/dev/null || true)
+	local_fqdn=$(hostname -f 2>/dev/null || true)
+
+	case "$host" in
+		localhost|localhost.localdomain|127.0.0.1|::1) return 0 ;;
+	esac
+	if [ -n "$local_short" ]; then
+		if [ "$host" = "$local_short" ] || [ "$host_short" = "$local_short" ]; then
+			return 0
+		fi
+	fi
+	if [ -n "$local_fqdn" ] && [ "$host" = "$local_fqdn" ]; then
+		return 0
+	fi
+	if [ -n "${HOSTNAME:-}" ] && [ "$host" = "$HOSTNAME" ]; then
+		return 0
+	fi
+	if [ -n "${MASTER_HOST:-}" ]; then
+		if [ "$host" = "$MASTER_HOST" ] || [ "$host_short" = "$MASTER_HOST" ]; then
+			return 0
+		fi
+	fi
+	return 1
+}
+
+copy_to_host_home()
+{
+	local host="$1"
+	shift
+
+	if [ "$#" -lt 1 ]; then
+		echo "ERROR: copy_to_host_home: missing files"
+		exit 1
+	fi
+	if is_local_host "$host"; then
+		echo "copy $* to local $ADMIN_HOME"
+		cp "$@" "$ADMIN_HOME/"
+	else
+		echo "copy $* to $host:$ADMIN_HOME"
+		scp $SSH_BATCH_OPTS "$@" "$host:$ADMIN_HOME/"
+	fi
+}
+
+count_processes_on_host()
+{
+	local host="$1"
+	local pattern="$2"
+	local next_count
+
+	if is_local_host "$host"; then
+		next_count=$(ps -ef | grep -E -- "$pattern" | grep -v grep | wc -l)
+	else
+		next_count=$(ssh -n $SSH_BATCH_OPTS "$host" "ps -ef | grep -E -- '$pattern' | grep -v grep | wc -l" 2>&1 || true)
+	fi
+	if ! [[ $next_count =~ ^[0-9]+$ ]]; then
+		next_count="1"
+	fi
+	echo "$next_count"
+}
+
+kill_processes_on_host()
+{
+	local host="$1"
+	local pattern="$2"
+	local k
+
+	echo "$host: kill processes matching $pattern"
+	if is_local_host "$host"; then
+		for k in $(ps -ef | grep -E -- "$pattern" | grep -v grep | awk '{print $2}'); do
+			[ -n "$k" ] || continue
+			echo "killing $k"
+			kill "$k" 2>/dev/null || true
+		done
+	else
+		for k in $(ssh -n $SSH_BATCH_OPTS "$host" "ps -ef | grep -E -- '$pattern' | grep -v grep" | awk '{print $2}'); do
+			[ -n "$k" ] || continue
+			echo "killing $k"
+			ssh -n $SSH_BATCH_OPTS "$host" "kill $k" || true
+		done
+	fi
+}
+
+start_generate_data_on_host()
+{
+	local host="$1"
+	local scale="$2"
+	local child="$3"
+	local parallel="$4"
+	local gen_data_path="$5"
+	local logfile="$ADMIN_HOME/generate_data.${child}.log"
+
+	if is_local_host "$host"; then
+		echo "local generate_data.sh $scale $child $parallel $gen_data_path"
+		(
+			cd "$ADMIN_HOME"
+			./generate_data.sh "$scale" "$child" "$parallel" "$gen_data_path"
+		) > "$logfile" 2>&1 &
+	else
+		echo "ssh -n -f $host generate_data.sh $scale $child $parallel $gen_data_path"
+		ssh -n -f $SSH_BATCH_OPTS "$host" "bash -c 'cd ~/; ./generate_data.sh $scale $child $parallel $gen_data_path > generate_data.$child.log 2>&1 < generate_data.$child.log &'"
+	fi
+}
+
+require_ssh_access()
+{
+	local host="$1"
+	local ssh_err
+	local user="${ADMIN_USER:-$(whoami)}"
+
+	if [ -z "$host" ]; then
+		echo "ERROR: require_ssh_access: host is empty"
+		exit 1
+	fi
+
+	if ! ssh_err=$(ssh -n $SSH_BATCH_OPTS "$host" "true" 2>&1); then
+		echo "ERROR: у пользователя $user нет SSH на $host"
+		echo "$ssh_err"
+		exit 1
+	fi
+}
+
+# Passwordless SSH is required only for remote segment hosts.
+# Local-only (single-node PostgreSQL) uses cp / local generate_data.sh.
+require_ssh_to_segment_hosts()
+{
+	local hosts_file="${1:-$LOCAL_PWD/segment_hosts.txt}"
+	local host
+	local seen="|"
+	local remote_count=0
+
+	require_segment_hosts_file "$hosts_file"
+
+	while IFS= read -r host || [ -n "$host" ]; do
+		host=$(echo "$host" | tr -d '[:space:]')
+		[ -z "$host" ] && continue
+		case "$seen" in
+			*"|$host|"*) continue ;;
+		esac
+		seen="${seen}${host}|"
+		if is_local_host "$host"; then
+			continue
+		fi
+		remote_count=$((remote_count + 1))
+		require_ssh_access "$host"
+	done < "$hosts_file"
+
+	if [ -n "${HOSTNAME:-}" ]; then
+		host=$(echo "$HOSTNAME" | tr -d '[:space:]')
+		if [ -n "$host" ]; then
+			case "$seen" in
+				*"|$host|"*) ;;
+				*)
+					if ! is_local_host "$host"; then
+						remote_count=$((remote_count + 1))
+						require_ssh_access "$host"
+					fi
+					;;
+			esac
+		fi
+	fi
+
+	if [ "$remote_count" -eq 0 ]; then
+		echo "All segment hosts are local; SSH is not required"
+	fi
+}
+
 # Ensure a rollout_*.log exists and is readable for server-side COPY FROM (reports).
 # Missing files happen when the corresponding step was skipped (e.g. no compile_tpch run).
 ensure_rollout_log_for_copy()

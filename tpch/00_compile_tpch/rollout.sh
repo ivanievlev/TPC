@@ -34,10 +34,10 @@ copy_tpc()
 	cp $PWD/dbgen/qgen ../*_multi_user/queries/
 	cp $PWD/dbgen/dists.dss ../*_multi_user/queries/
 
-	#copy the compiled dbgen program to the segment hosts
+	#copy the compiled dbgen program to the segment hosts (local cp if single node)
+	require_ssh_to_segment_hosts
 	for i in $(cat $PWD/../../segment_hosts.txt); do
-		echo "copy tpch binaries to $i:$ADMIN_HOME"
-		scp dbgen/dbgen dbgen/dists.dss $i:$ADMIN_HOME/
+		copy_to_host_home "$i" dbgen/dbgen dbgen/dists.dss
 	done
 }
 

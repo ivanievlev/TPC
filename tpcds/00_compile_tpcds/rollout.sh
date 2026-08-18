@@ -27,10 +27,10 @@ copy_tpc()
 	cp $PWD/tools/tpcds.idx ../*_gen_data/
 	cp $PWD/tools/tpcds.idx ../*_multi_user/
 
-	#copy the compiled dsdgen program to the segment hosts
+	#copy the compiled dsdgen program to the segment hosts (local cp if single node)
+	require_ssh_to_segment_hosts
 	for i in $(cat $PWD/../../segment_hosts.txt); do
-		echo "copy tpcds binaries to $i:$ADMIN_HOME"
-		scp tools/dsdgen tools/tpcds.idx $i:$ADMIN_HOME/
+		copy_to_host_home "$i" tools/dsdgen tools/tpcds.idx
 	done
 }
 
