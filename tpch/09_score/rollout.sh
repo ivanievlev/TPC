@@ -24,17 +24,17 @@ select coalesce(sum(extract('epoch' from duration)),0)
 from ${TPC_REPORT_SCHEMA}.load
 where tuples = 0
   and (
-       split_part(description, '.', 2) like 'idx\_%' escape '\'
-       or split_part(description, '.', 2) like '%\_pkey' escape '\'
-       or split_part(description, '.', 2) like 'constraint\_%' escape '\'
+       split_part(description, '.', 2) like 'idx\_%' escape chr(92)
+       or split_part(description, '.', 2) like '%\_pkey' escape chr(92)
+       or split_part(description, '.', 2) like 'constraint\_%' escape chr(92)
       )")
 analyze_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "
 select coalesce(sum(extract('epoch' from duration)),0)
 from ${TPC_REPORT_SCHEMA}.load
 where tuples = 0
-  and split_part(description, '.', 2) not like 'idx\_%' escape '\'
-  and split_part(description, '.', 2) not like '%\_pkey' escape '\'
-  and split_part(description, '.', 2) not like 'constraint\_%' escape '\'")
+  and split_part(description, '.', 2) not like 'idx\_%' escape chr(92)
+  and split_part(description, '.', 2) not like '%\_pkey' escape chr(92)
+  and split_part(description, '.', 2) not like 'constraint\_%' escape chr(92)")
 queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from (SELECT split_part(description, '.', 2) AS id,  min(duration) AS duration FROM ${TPC_REPORT_SCHEMA}.sql GROUP BY split_part(description, '.', 2)) as sub")
 concurrent_queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from ${TPC_TESTING_SCHEMA}.sql")
 

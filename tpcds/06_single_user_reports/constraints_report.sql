@@ -4,8 +4,8 @@ SELECT split_part(description, '.', 1) AS schema_name,
 FROM tpcds_reports.load
 WHERE tuples = 0
   AND (
-       split_part(description, '.', 2) LIKE 'idx\_%' ESCAPE '\'
-       OR split_part(description, '.', 2) LIKE '%\_pkey' ESCAPE '\'
-       OR split_part(description, '.', 2) LIKE 'constraint\_%' ESCAPE '\'
+       split_part(description, '.', 2) LIKE 'idx\_%' ESCAPE E'\\'
+       OR split_part(description, '.', 2) LIKE '%\_pkey' ESCAPE E'\\'
+       OR split_part(description, '.', 2) LIKE 'constraint\_%' ESCAPE E'\\'
       )
 ORDER BY 1, 2;
