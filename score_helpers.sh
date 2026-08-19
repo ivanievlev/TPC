@@ -378,3 +378,81 @@ print_extended_score_metrics()
 		score_os_metrics_for_window "07" "$s07" "$e07"
 	fi
 }
+
+# Brief Validate Answer Sets block for 09_score when VALIDATE_ANSWER_SETS=true.
+# Runs validate_answer_sets.sh (full diff vs toolkit .ans) and prints a short summary.
+# Returns 0 on pass/skip, 1 on FAIL/ERROR.
+print_answer_set_validation_section()
+{
+	if [ "${VALIDATE_ANSWER_SETS:-false}" != "true" ]; then
+		return 0
+	fi
+
+	local root="${LOCAL_PWD:-}"
+	if [ -z "$root" ]; then
+		if [ -d "$PWD/log" ]; then
+			root="$PWD"
+		else
+			root="$PWD/../.."
+		fi
+	fi
+	local validator="$root/validate_answer_sets.sh"
+	local out_dir="$root/log/answer_set_validation"
+	local report="$out_dir/report.txt"
+	local run_log="$out_dir/run.log"
+	local rc=0
+	local scale_norm summary fails
+
+	echo ""
+	echo "********************************************************************************"
+	echo "Validate Answer Sets"
+	echo "********************************************************************************"
+
+	if [ "${TPC_MODE:-TPC-DS}" != "TPC-DS" ]; then
+		echo "Step VALIDATE_ANSWER_SETS skipped because TPC_MODE=$TPC_MODE (supported for TPC-DS only)"
+		return 0
+	fi
+
+	scale_norm=$(echo "${GEN_DATA_SCALE:-}" | tr -d '[:space:]')
+	if [ "$scale_norm" != "1" ] && [ "$scale_norm" != "1.0" ]; then
+		echo "Step VALIDATE_ANSWER_SETS skipped because GEN_DATA_SCALE > 1 (GEN_DATA_SCALE=$GEN_DATA_SCALE; requires 1)"
+		return 0
+	fi
+
+	if [ ! -f "$validator" ]; then
+		echo "ERROR: $validator not found"
+		return 1
+	fi
+
+	mkdir -p "$out_dir"
+	export VALIDATE_ANSWER_SETS GEN_DATA_SCALE DBNAME STATEMENT_TIMEOUT RUN_SQL_FROM_ROLE TPC_MODE
+	set +e
+	"$validator" >"$run_log" 2>&1
+	rc=$?
+	set -e
+
+	if [ -f "$report" ]; then
+		summary=$(grep -E '^SUMMARY:' "$report" | tail -1 || true)
+		if [ -n "$summary" ]; then
+			echo "$summary"
+		else
+			echo "SUMMARY: (missing in report)"
+		fi
+		fails=$(grep -E '^Q[0-9]+: (FAIL|ERROR)' "$report" || true)
+		if [ -n "$fails" ]; then
+			echo "Failed / errored queries:"
+			echo "$fails" | sed 's/^/  /'
+		fi
+		echo "Full report: $report"
+	else
+		echo "WARNING: validation report not found; see $run_log"
+		tail -20 "$run_log" 2>/dev/null | sed 's/^/  /' || true
+	fi
+
+	if [ "$rc" -ne 0 ]; then
+		echo "Validate Answer Sets: FAILED (exit $rc)"
+		return 1
+	fi
+	echo "Validate Answer Sets: OK"
+	return 0
+}

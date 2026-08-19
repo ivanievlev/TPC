@@ -79,4 +79,8 @@ printf "%-36s %14.3f\n" "Score" "$score"
 echo ""
 print_extended_score_metrics "$TPC_REPORT_SCHEMA" "$TPC_TESTING_SCHEMA"
 
+vas_rc=0
+print_answer_set_validation_section || vas_rc=$?
+
 end_step $step
+exit $vas_rc

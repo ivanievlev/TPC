@@ -27,7 +27,7 @@ DUCKDB_MEMORY_LIMIT=${35}
 DUCKDB_THREADS=${36}
 DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${37}
 DUCKDB_THREADS_FOR_POSTGRES_SCAN=${38}
-SKIP_QUERIES_LIST=${41}
+SKIP_QUERIES_LIST=${42}
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
 	echo "You must provide the scale as a parameter in terms of Gigabytes, true/false to run queries with EXPLAIN ANALYZE option, true/false to use random distrbution, multi-user count, and the number of sql iterations."

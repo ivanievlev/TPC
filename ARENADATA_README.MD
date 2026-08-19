@@ -229,6 +229,14 @@ Step logs go into subdirectories of `log/`:
 	``Sampling interval for the OS metrics collector when COLLECT_OS_DATA=true. Same duration syntax as STATEMENT_TIMEOUT
 	(e.g. "1s", "5s", "1min", "1m", "2h"). Values below 1 second are rounded up to 1s. Default "5s".``
 
+- VALIDATE_ANSWER_SETS="false"
+
+	``Default "false". When "true" and TPC_MODE=TPC-DS with GEN_DATA_SCALE=1, step 09_score runs qualification
+	queries (`dsqgen -QUALIFY Y`), compares full normalized results to `tpcds/00_compile_tpcds/answer_sets/`
+	(prefers `*_NULLS_LAST.ans`), and prints a short Validate Answer Sets section in the score output.
+	Details go under `log/answer_set_validation/`. If GEN_DATA_SCALE is not 1, the score section logs:
+	`Step VALIDATE_ANSWER_SETS skipped because GEN_DATA_SCALE > 1` and continues.``
+
 - DUCKDB_MEMORY_LIMIT="4GB"
 
 	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.memory_limit for each query session in steps 05 and 07.
