@@ -36,7 +36,12 @@ where tuples = 0
   and split_part(description, '.', 2) not like '%\_pkey' escape chr(92)
   and split_part(description, '.', 2) not like 'constraint\_%' escape chr(92)")
 queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from (SELECT split_part(description, '.', 2) AS id,  min(duration) AS duration FROM ${TPC_REPORT_SCHEMA}.sql GROUP BY split_part(description, '.', 2)) as sub")
-concurrent_queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from ${TPC_TESTING_SCHEMA}.sql")
+if [ "${RUN_MULTI_USER_REPORT:-false}" = "true" ]; then
+	concurrent_queries_time=$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from ${TPC_TESTING_SCHEMA}.sql")
+else
+	echo "Skipping multi-user time (RUN_MULTI_USER_REPORT=${RUN_MULTI_USER_REPORT:-false})"
+	concurrent_queries_time=0
+fi
 
 for v in load_time constraints_time analyze_time queries_time concurrent_queries_time; do
 	eval "val=\${$v}"
@@ -68,10 +73,18 @@ printf "%-36s %14.3f\n" "Load" "$load_time"
 printf "%-36s %14.3f\n" "Constraints after load" "$constraints_time"
 printf "%-36s %14.3f\n" "Analyze" "$analyze_time"
 printf "%-36s %14.3f\n" "1 User Queries" "$queries_time"
-printf "%-36s %14.3f\n" "${MULTI_USER_COUNT} User Queries" "$concurrent_queries_time"
+if [ "${RUN_MULTI_USER_REPORT:-false}" = "true" ]; then
+	printf "%-36s %14.3f\n" "${MULTI_USER_COUNT} User Queries" "$concurrent_queries_time"
+else
+	printf "%-36s %14s\n" "${MULTI_USER_COUNT} User Queries" "skipped"
+fi
 printf "%-36s %14s\n" "Q" "$q"
 printf "%-36s %14.3f\n" "TPT" "$tpt"
-printf "%-36s %14.3f\n" "TTT" "$concurrent_queries_time"
+if [ "${RUN_MULTI_USER_REPORT:-false}" = "true" ]; then
+	printf "%-36s %14.3f\n" "TTT" "$concurrent_queries_time"
+else
+	printf "%-36s %14s\n" "TTT" "skipped"
+fi
 printf "%-36s %14.3f\n" "TLD" "$tld"
 printf "%-36s %14.3f\n" "Score" "$score"
 echo ""

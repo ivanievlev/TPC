@@ -263,6 +263,8 @@ fi
 if [ "$RUN_MULTI_USER_REPORT" == "true" ]; then
 	rm -f $PWD/log/end_multi_user_reports.log
 fi
+
+export RUN_MULTI_USER RUN_MULTI_USER_REPORT
 if [ "$RUN_SCORE" == "true" ]; then
 	rm -f $PWD/log/end_score.log
 fi
