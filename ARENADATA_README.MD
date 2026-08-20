@@ -205,6 +205,12 @@ Step logs go into subdirectories of `log/`:
 	on leftover client sessions in DBNAME so orphan queries cannot block DROP SCHEMA/DDL. The current
 	tpc.sh and its ancestors are never killed. When "false", no process cleanup is done.``
 
+- DROP_CACHE_BEFORE_SQL="false"
+
+	``Default "false". When "true", immediately before step 05_sql runs:
+	`sync && echo 3 > /proc/sys/vm/drop_caches` (via passwordless sudo) to drop the OS page cache.
+	Applies to both TPC-DS and TPC-H. Does not drop cache before each individual query or before multi-user.``
+
 - RUN_SQL_WITH_DUCKDB="false"
 
 	``PostgreSQL/pg_duckdb only. Default "false": steps 05 and 07 run as usual on Postgres.

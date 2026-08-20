@@ -20,6 +20,19 @@ ADMIN_USER=`whoami`
 ADMIN_HOME=$(eval echo ~$ADMIN_USER)
 MASTER_HOST=$(hostname -s)
 
+# Flush OS page cache (pagecache + dentries + inodes). Requires passwordless sudo.
+drop_os_page_cache()
+{
+	echo "DROP_CACHE_BEFORE_SQL: sync && echo 3 > /proc/sys/vm/drop_caches"
+	sync
+	if ! sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches'; then
+		echo "ERROR: failed to write /proc/sys/vm/drop_caches (need passwordless sudo)."
+		return 1
+	fi
+	echo "DROP_CACHE_BEFORE_SQL: OS page cache dropped"
+	return 0
+}
+
 get_gpfdist_port()
 {
 	all_ports=$(psql -d postgres -t -A -c "select min(case when role = 'p' then port else 999999 end), min(case when role = 'm' then port else 999999 end) from gp_segment_configuration where content >= 0")
