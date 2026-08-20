@@ -720,3 +720,387 @@ create_empty_catalog_schemas()
 	echo "done."
 	echo ""
 }
+
+# Detect HDD vs SSD for PGConfig (rotational=0 → SSD). Falls back to HDD.
+pgconfig_detect_drive_type()
+{
+	local path="${1:-/}"
+	local src kname rotational
+
+	if [ ! -e "$path" ]; then
+		path="/"
+	fi
+
+	src=$(df -P "$path" 2>/dev/null | awk 'NR==2 {print $1}')
+	if [ -z "$src" ]; then
+		echo "HDD"
+		return 0
+	fi
+
+	case "$src" in
+		*nvme*)
+			echo "SSD"
+			return 0
+			;;
+	esac
+
+	if command -v lsblk >/dev/null 2>&1; then
+		kname=$(lsblk -no PKNAME "$src" 2>/dev/null | awk 'NF { print; exit }')
+		if [ -z "$kname" ]; then
+			kname=$(lsblk -no KNAME "$src" 2>/dev/null | awk 'NF { print; exit }')
+		fi
+	fi
+
+	if [ -z "$kname" ]; then
+		kname=$(basename "$src")
+		if echo "$kname" | grep -q '^nvme'; then
+			kname=$(echo "$kname" | sed 's/p[0-9][0-9]*$//')
+		else
+			kname=$(echo "$kname" | sed 's/[0-9][0-9]*$//')
+		fi
+	fi
+
+	if [ -n "$kname" ] && [ -f "/sys/block/$kname/queue/rotational" ]; then
+		rotational=$(cat "/sys/block/$kname/queue/rotational")
+		if [ "$rotational" = "0" ]; then
+			echo "SSD"
+			return 0
+		fi
+		echo "HDD"
+		return 0
+	fi
+
+	echo "HDD"
+}
+
+pgconfig_reload_and_report()
+{
+	local pending
+	echo "APPLY_PGCONFIG_PARAMETERS: SELECT pg_reload_conf()"
+	psql -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_reload_conf();"
+	pending=$(psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT string_agg(name || '=' || setting, ', ' ORDER BY name) FROM pg_settings WHERE pending_restart")
+	if [ -n "$pending" ]; then
+		echo "APPLY_PGCONFIG_PARAMETERS: the following settings need a PostgreSQL restart to take effect: $pending"
+	fi
+}
+
+# Names pgconfig may write via ALTER SYSTEM. listen_addresses is never touched.
+pgconfig_reset_guc_names()
+{
+	cat <<'EOF'
+shared_buffers
+effective_cache_size
+work_mem
+maintenance_work_mem
+min_wal_size
+max_wal_size
+checkpoint_completion_target
+wal_buffers
+checkpoint_segments
+max_connections
+random_page_cost
+effective_io_concurrency
+maintenance_io_concurrency
+seq_page_cost
+io_method
+io_workers
+io_max_combine_limit
+io_max_concurrency
+file_copy_method
+max_worker_processes
+max_parallel_workers_per_gather
+max_parallel_workers
+max_parallel_maintenance_workers
+huge_pages
+wal_writer_delay
+default_statistics_target
+constraint_exclusion
+cpu_tuple_cost
+cpu_index_tuple_cost
+cpu_operator_cost
+parallel_tuple_cost
+parallel_setup_cost
+EOF
+}
+
+# APPLY_PGCONFIG_PARAMETERS=false: ALTER SYSTEM RESET of pgconfig GUCs.
+pgconfig_reset_parameters()
+{
+	local pgdata name exists sql_file
+
+	pgdata=$(psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SHOW data_directory")
+	sql_file="$LOCAL_PWD/log/pgconfig_alter_system.sql"
+
+	echo "############################################################################"
+	echo "APPLY_PGCONFIG_PARAMETERS=false: ALTER SYSTEM RESET of pgconfig parameters"
+	echo "############################################################################"
+
+	while IFS= read -r name; do
+		[ -n "$name" ] || continue
+		exists=$(psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT count(*) FROM pg_settings WHERE name = '$name'")
+		if [ "$exists" != "1" ]; then
+			continue
+		fi
+		echo "APPLY_PGCONFIG_PARAMETERS: ALTER SYSTEM RESET $name"
+		if ! psql -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM RESET $name"; then
+			echo "APPLY_PGCONFIG_PARAMETERS: failed to reset $name, skipping"
+			continue
+		fi
+	done < <(
+		{
+			pgconfig_reset_guc_names
+			if [ -f "$sql_file" ]; then
+				awk 'BEGIN { IGNORECASE=1 } /^[[:space:]]*ALTER SYSTEM SET / { print $4 }' "$sql_file"
+			fi
+		} | awk 'NF && $1 != "listen_addresses" && !seen[$1]++'
+	)
+
+	pgconfig_reload_and_report
+	if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.auto.conf" ]; then
+		cp "$pgdata/postgresql.auto.conf" "$LOCAL_PWD/log/postgresql.auto.conf" 2>/dev/null || true
+	fi
+	return 0
+}
+
+# When APPLY_PGCONFIG_PARAMETERS=true, fetch recommended GUCs from
+# https://api.pgconfig.org for this host's CPU/RAM/disk and apply them
+# with ALTER SYSTEM + pg_reload_conf(). PostgreSQL only.
+# When false, ALTER SYSTEM RESET those parameters.
+apply_pgconfig_parameters()
+{
+	get_version
+	if [[ "$VERSION" == *"gpdb"* ]]; then
+		echo "APPLY_PGCONFIG_PARAMETERS: skipped (Greenplum is not supported by pgconfig)"
+		return 0
+	fi
+
+	if ! psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT 1" >/dev/null 2>&1; then
+		if [ "${APPLY_PGCONFIG_PARAMETERS:-false}" = "true" ]; then
+			echo "ERROR: APPLY_PGCONFIG_PARAMETERS=true requires a running PostgreSQL instance"
+			return 1
+		fi
+		echo "APPLY_PGCONFIG_PARAMETERS=false: postgres is not reachable, cannot RESET previous pgconfig settings"
+		return 0
+	fi
+
+	if [ "${APPLY_PGCONFIG_PARAMETERS:-false}" != "true" ]; then
+		pgconfig_reset_parameters
+		return $?
+	fi
+
+	if ! command -v curl >/dev/null 2>&1; then
+		echo "ERROR: APPLY_PGCONFIG_PARAMETERS=true requires curl to call https://api.pgconfig.org"
+		return 1
+	fi
+
+	local cpus ram_gb total_ram pg_major arch os_type drive_type pgdata
+	local url sql_file line name exists applied skipped
+	local mem_kb
+
+	cpus=$(nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 1)
+	if ! [[ "$cpus" =~ ^[0-9]+$ ]] || [ "$cpus" -lt 1 ]; then
+		cpus=1
+	fi
+
+	if [ -f /proc/meminfo ]; then
+		mem_kb=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+		if [[ "$mem_kb" =~ ^[0-9]+$ ]]; then
+			ram_gb=$(( (mem_kb + 1048576 - 1) / 1048576 ))
+		else
+			ram_gb=2
+		fi
+	else
+		ram_gb=2
+	fi
+	if [ "$ram_gb" -lt 1 ]; then
+		ram_gb=1
+	fi
+	total_ram="${ram_gb}GB"
+
+	pg_major=$(psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SHOW server_version" | sed 's/^\([0-9][0-9]*\).*/\1/')
+	if [ -z "$pg_major" ]; then
+		echo "ERROR: could not detect PostgreSQL major version for pgconfig"
+		return 1
+	fi
+
+	case "$(uname -m)" in
+		x86_64|amd64) arch="x86-64" ;;
+		i386|i686) arch="i686" ;;
+		*) arch="x86-64" ;;
+	esac
+
+	os_type=$(uname -s)
+	case "$os_type" in
+		Linux) os_type="Linux" ;;
+		Darwin) os_type="Unix" ;;
+		MINGW*|MSYS*|CYGWIN*|Windows*) os_type="Windows" ;;
+		*) os_type="Linux" ;;
+	esac
+
+	pgdata=$(psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SHOW data_directory")
+	drive_type=$(pgconfig_detect_drive_type "$pgdata")
+
+	mkdir -p "$LOCAL_PWD/log"
+	sql_file="$LOCAL_PWD/log/pgconfig_alter_system.sql"
+
+	url="https://api.pgconfig.org/v1/tuning/get-config?environment_name=DW&format=alter_system&pg_version=${pg_major}&total_ram=${total_ram}&cpus=${cpus}&drive_type=${drive_type}&os_type=${os_type}&arch=${arch}"
+
+	echo "############################################################################"
+	echo "APPLY_PGCONFIG_PARAMETERS: fetching recommended postgresql.conf from pgconfig"
+	echo "  cpus=$cpus total_ram=$total_ram drive_type=$drive_type pg_version=$pg_major os_type=$os_type arch=$arch"
+	echo "  environment_name=DW (TPC)"
+	echo "  $url"
+	echo "############################################################################"
+
+	if ! curl -fsSL "$url" -o "$sql_file"; then
+		echo "ERROR: failed to download pgconfig recommendations from $url"
+		return 1
+	fi
+
+	if ! grep -q 'ALTER SYSTEM SET' "$sql_file"; then
+		echo "ERROR: pgconfig API did not return ALTER SYSTEM statements. Response:"
+		cat "$sql_file"
+		return 1
+	fi
+
+	applied=0
+	skipped=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		case "$line" in
+			''|--*)
+				continue
+				;;
+		esac
+		echo "$line" | grep -qi '^ALTER SYSTEM SET ' || continue
+
+		name=$(printf '%s\n' "$line" | awk '{ print $4 }')
+		if [ -z "$name" ]; then
+			continue
+		fi
+
+		# Do not widen listen_addresses on a test host.
+		if [ "$name" = "listen_addresses" ]; then
+			echo "APPLY_PGCONFIG_PARAMETERS: skip $name"
+			skipped=$((skipped + 1))
+			continue
+		fi
+
+		exists=$(psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT count(*) FROM pg_settings WHERE name = '$name'")
+		if [ "$exists" != "1" ]; then
+			echo "APPLY_PGCONFIG_PARAMETERS: skip unknown GUC $name"
+			skipped=$((skipped + 1))
+			continue
+		fi
+
+		echo "APPLY_PGCONFIG_PARAMETERS: $line"
+		if ! psql -d postgres -v ON_ERROR_STOP=1 -c "$line"; then
+			echo "APPLY_PGCONFIG_PARAMETERS: failed to apply $name, skipping"
+			skipped=$((skipped + 1))
+			continue
+		fi
+		applied=$((applied + 1))
+	done < "$sql_file"
+
+	echo "APPLY_PGCONFIG_PARAMETERS: applied=$applied skipped=$skipped"
+	pgconfig_reload_and_report
+
+	if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.auto.conf" ]; then
+		cp "$pgdata/postgresql.auto.conf" "$LOCAL_PWD/log/postgresql.auto.conf" 2>/dev/null || true
+	fi
+
+	return 0
+}
+
+# Extra GUCs to include in the 02_init parameter listing (beyond pgconfig names).
+pgconfig_test_parameter_names()
+{
+	pgconfig_reset_guc_names
+	cat <<'EOF'
+listen_addresses
+port
+data_directory
+server_version
+max_prepared_transactions
+statement_timeout
+idle_in_transaction_session_timeout
+lock_timeout
+wal_level
+fsync
+synchronous_commit
+full_page_writes
+wal_compression
+autovacuum
+jit
+max_locks_per_transaction
+max_stack_depth
+temp_buffers
+shared_preload_libraries
+max_wal_senders
+optimizer
+gp_autostats_mode
+optimizer_analyze_root_partition
+gp_workfile_limit_per_query
+gp_workfile_limit_per_segment
+gp_workfile_limit_files_per_query
+EOF
+}
+
+# Print the PostgreSQL GUCs the rest of the TPC run will use (after pgconfig apply/reset).
+log_postgres_test_parameters()
+{
+	local db out array_sql pending pgdata
+
+	db="${DBNAME:-postgres}"
+	mkdir -p "$LOCAL_PWD/log"
+	out="$LOCAL_PWD/log/postgres_test_parameters.txt"
+
+	array_sql=$(
+		pgconfig_test_parameter_names | awk 'NF && !seen[$1]++ {
+			printf "%s'\''%s'\''", (n ? ", " : ""), $1
+			n = 1
+		}'
+	)
+
+	{
+		echo "############################################################################"
+		echo "PostgreSQL parameters for this test run"
+		echo "############################################################################"
+		echo "APPLY_PGCONFIG_PARAMETERS=${APPLY_PGCONFIG_PARAMETERS:-false}"
+		echo "DBNAME=$db"
+		echo "PGUSER=${PGUSER:-}"
+		echo ""
+		echo "Key GUCs (active values; pending_restart=t is not in effect until restart):"
+		psql -d "$db" -v ON_ERROR_STOP=1 -c "
+SELECT name,
+       current_setting(name) AS value,
+       source,
+       pending_restart
+FROM pg_settings
+WHERE name = ANY(ARRAY[${array_sql}])
+ORDER BY name;
+"
+		echo ""
+		echo "Non-default settings (source <> default):"
+		psql -d "$db" -v ON_ERROR_STOP=1 -c "
+SELECT name,
+       current_setting(name) AS value,
+       source,
+       pending_restart
+FROM pg_settings
+WHERE source IS DISTINCT FROM 'default'
+ORDER BY name;
+"
+		pending=$(psql -d "$db" -v ON_ERROR_STOP=1 -tA -c "SELECT string_agg(name, ', ' ORDER BY name) FROM pg_settings WHERE pending_restart")
+		if [ -n "$pending" ]; then
+			echo ""
+			echo "WARNING: pending_restart (test will use the active value above until PostgreSQL is restarted): $pending"
+		fi
+		pgdata=$(psql -d "$db" -v ON_ERROR_STOP=1 -tA -c "SHOW data_directory")
+		if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.auto.conf" ]; then
+			echo ""
+			echo "----- $pgdata/postgresql.auto.conf -----"
+			cat "$pgdata/postgresql.auto.conf"
+		fi
+		echo "############################################################################"
+	} | tee "$out"
+}

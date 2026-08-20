@@ -58,6 +58,7 @@ COLLECT_OS_DATA="${49:-true}"
 COLLECT_DATA_PERIOD="${50:-5s}"
 SKIP_QUERIES_LIST="${51}"
 TPC_MODE="${52:-TPC-DS}"
+APPLY_PGCONFIG_PARAMETERS="${APPLY_PGCONFIG_PARAMETERS:-false}"
 
 init_tpc_mode
 
@@ -67,7 +68,7 @@ fi
 if [ -z "$COLLECT_DATA_PERIOD" ]; then
 	COLLECT_DATA_PERIOD="5s"
 fi
-export COLLECT_OS_DATA COLLECT_DATA_PERIOD
+export COLLECT_OS_DATA COLLECT_DATA_PERIOD APPLY_PGCONFIG_PARAMETERS
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPC" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SQL" == "" || "$RUN_SINGLE_USER_REPORT" == "" || "$RUN_MULTI_USER" == "" || "$RUN_MULTI_USER_REPORT" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
 	echo "Please run this script from tpc.sh so the correct parameters are passed to it."
@@ -224,6 +225,7 @@ echo "SKIP_QUERIES_LIST: $SKIP_QUERIES_LIST"
 echo "EMPTY_SCHEMAS_CNT: $EMPTY_SCHEMAS_CNT"
 echo "COLLECT_OS_DATA: $COLLECT_OS_DATA"
 echo "COLLECT_DATA_PERIOD: $COLLECT_DATA_PERIOD"
+echo "APPLY_PGCONFIG_PARAMETERS: $APPLY_PGCONFIG_PARAMETERS"
 echo "TRUNCATE_BEFORE_LOAD: $TRUNCATE_BEFORE_LOAD"
 echo "DROP_CACHE_BEFORE_SQL: $DROP_CACHE_BEFORE_SQL"
 echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
@@ -234,6 +236,11 @@ echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
 echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
 echo "############################################################################"
 echo ""
+
+# Revert pgconfig GUCs from a previous true run even if 02_init is skipped.
+if [ "${APPLY_PGCONFIG_PARAMETERS:-false}" != "true" ]; then
+	apply_pgconfig_parameters
+fi
 
 # RUN_COMPILE_TPC gates the compile step for either mode (00_compile_tpcds / 00_compile_tpch).
 if [ "$RUN_COMPILE_TPC" == "true" ]; then
@@ -265,7 +272,7 @@ if [ "$RUN_MULTI_USER_REPORT" == "true" ]; then
 	rm -f $PWD/log/end_multi_user_reports.log
 fi
 
-export RUN_MULTI_USER RUN_MULTI_USER_REPORT
+export RUN_MULTI_USER RUN_MULTI_USER_REPORT APPLY_PGCONFIG_PARAMETERS
 if [ "$RUN_SCORE" == "true" ]; then
 	rm -f $PWD/log/end_score.log
 fi

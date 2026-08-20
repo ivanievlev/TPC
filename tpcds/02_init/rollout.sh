@@ -257,9 +257,12 @@ if [[ "$VERSION" == *"gpdb"* ]]; then
 	set_net_core_mem
 fi
 
+apply_pgconfig_parameters
+
 set_search_path
 create_run_sql_from_role
 export PGUSER=$RUN_SQL_FROM_ROLE
+log_postgres_test_parameters
 i=""
 id=""
 log

@@ -130,7 +130,9 @@ if [[ "$VERSION" == *"gpdb"* ]]; then
 	check_gucs
 	copy_config
 fi
+apply_pgconfig_parameters
 set_search_path
+log_postgres_test_parameters
 
 log
 
