@@ -2,6 +2,7 @@
 log/
 *.log
 
+*.code-workspace
 # Local config / runtime
 tpc_variables.sh
 tpcds_variables.sh
