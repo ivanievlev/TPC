@@ -21,17 +21,12 @@ ADMIN_HOME=$(eval echo ~$ADMIN_USER)
 MASTER_HOST=$(hostname -s)
 
 # .dat / gpfdist subdirectory name (not a clone path).
-# Combined with EXTERNAL_FILE_DIRECTORY_PATH (default /tmp):
-#   GP:  /tmp/primary/gpseg0/arenadata
-#   PG:  /tmp/arenadata_1
-if [ -z "${DAT_FILE_SUBDIRECTORY_NAME:-}" ]; then
-	DAT_FILE_SUBDIRECTORY_NAME="${42:-arenadata}"
-fi
+# EXTERNAL_FILE_DIRECTORY_PATH is only the root (default /tmp). .dat files:
+#   GP:  $EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/$DAT_FILE_SUBDIRECTORY_NAME
+#   PG:  $EXTERNAL_FILE_DIRECTORY_PATH/${DAT_FILE_SUBDIRECTORY_NAME}_<child>
+# Do not take these from positional $42/$43 here: functions.sh is also sourced
+# from the top-level rollout.sh, where those slots are other flags (e.g. false).
 : "${DAT_FILE_SUBDIRECTORY_NAME:=arenadata}"
-
-if [ -z "${EXTERNAL_FILE_DIRECTORY_PATH:-}" ]; then
-	EXTERNAL_FILE_DIRECTORY_PATH="${43:-/tmp}"
-fi
 : "${EXTERNAL_FILE_DIRECTORY_PATH:=/tmp}"
 
 normalize_dat_file_subdirectory_name()
@@ -70,8 +65,9 @@ normalize_external_file_directory_path()
 	p="${p%/}"
 	[ -z "$p" ] && p="/tmp"
 	if [[ "$p" != /* ]]; then
-		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute path (got: ${EXTERNAL_FILE_DIRECTORY_PATH:-empty})."
-		echo "Example: EXTERNAL_FILE_DIRECTORY_PATH=\"/tmp\" → /tmp/primary/gpseg0/arenadata"
+		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute directory (got: ${EXTERNAL_FILE_DIRECTORY_PATH:-empty})."
+		echo "Use the root only (e.g. /tmp). .dat files are written under"
+		echo "  \$EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/\$DAT_FILE_SUBDIRECTORY_NAME"
 		exit 1
 	fi
 	if [[ "$p" == */../* || "$p" == */.. || "$p" == ../* || "$p" == .. ]]; then
@@ -81,19 +77,18 @@ normalize_external_file_directory_path()
 	EXTERNAL_FILE_DIRECTORY_PATH="$p"
 }
 
-# Greenplum: $EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg0/$DAT_FILE_SUBDIRECTORY_NAME
-# Uses last two components of the segment datadir (/data1/primary/gpseg0 → primary/gpseg0).
+# Greenplum .dat dir: $EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/$DAT_FILE_SUBDIRECTORY_NAME
+# N comes from the segment datadir basename (e.g. /data1/primary/gpseg0 → gpseg0).
 gp_dat_dir()
 {
 	local datadir="$1"
-	local parent leaf
+	local leaf
 	if [ -z "$datadir" ]; then
 		echo "ERROR: gp_dat_dir: empty segment datadir" >&2
 		exit 1
 	fi
-	parent=$(basename "$(dirname "$datadir")")
 	leaf=$(basename "$datadir")
-	echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${parent}/${leaf}/${DAT_FILE_SUBDIRECTORY_NAME}"
+	echo "${EXTERNAL_FILE_DIRECTORY_PATH}/primary/${leaf}/${DAT_FILE_SUBDIRECTORY_NAME}"
 }
 
 # PostgreSQL parallel chunks: $EXTERNAL_FILE_DIRECTORY_PATH/<name>_<child>
@@ -102,9 +97,6 @@ pg_chunk_dat_dir()
 	local child="$2"
 	echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_${child}"
 }
-
-normalize_dat_file_subdirectory_name
-normalize_external_file_directory_path
 
 # Flush OS page cache (pagecache + dentries + inodes). Requires passwordless sudo.
 drop_os_page_cache()

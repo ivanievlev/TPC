@@ -464,8 +464,9 @@ check_variables()
 	_ext="${_ext%/}"
 	[ -z "$_ext" ] && _ext="/tmp"
 	if [[ "$_ext" != /* ]]; then
-		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute path (got: $EXTERNAL_FILE_DIRECTORY_PATH)."
-		echo "Example: EXTERNAL_FILE_DIRECTORY_PATH=\"/tmp\" → /tmp/primary/gpseg0/arenadata"
+		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute directory (got: $EXTERNAL_FILE_DIRECTORY_PATH)."
+		echo "Use the root only (e.g. /tmp). .dat files are written under"
+		echo "  \$EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/\$DAT_FILE_SUBDIRECTORY_NAME"
 		exit 1
 	fi
 	if [[ "$_ext" == */../* || "$_ext" == */.. || "$_ext" == ../* || "$_ext" == .. ]]; then
