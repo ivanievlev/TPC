@@ -804,8 +804,8 @@ pgconfig_restart_postgres()
 
 	echo "APPLY_PGCONFIG_PARAMETERS: $pg_ctl_bin -D $pgdata stop -w -t 120 -m fast"
 	"$pg_ctl_bin" -D "$pgdata" stop -w -t 120 -m fast
-	echo "APPLY_PGCONFIG_PARAMETERS: $pg_ctl_bin -D $pgdata start -w -t 120"
-	"$pg_ctl_bin" -D "$pgdata" start -w -t 120
+	echo "APPLY_PGCONFIG_PARAMETERS: $pg_ctl_bin -D $pgdata -l $pgdata/logfile start -w -t 120"
+	"$pg_ctl_bin" -D "$pgdata" -l "$pgdata/logfile" start -w -t 120
 	psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT 1" >/dev/null
 }
 
