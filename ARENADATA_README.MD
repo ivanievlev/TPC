@@ -21,7 +21,7 @@ TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (p
 - Added support for Greenplum 7.x 
 - Changed compression options from quicklz to zstd
 - Added new parameters
-- Added `REPO_BRANCH` parameter to select the git branch used by `tpc.sh` (default: `master`)
+- Added `REPO_BRANCH` parameter to select the git branch used by `tpc.sh` (default: `main`)
 - Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN`, `DUCKDB_THREADS_FOR_POSTGRES_SCAN`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`, `SKIP_QUERIES_LIST`
 
 ## Installation
@@ -69,7 +69,7 @@ Step logs go into subdirectories of `log/`:
 
 - REPO="TPC-DS"
 - REPO_URL="https://github.com/ivanievlev/TPC-DS"
-- REPO_BRANCH="master"
+- REPO_BRANCH="main"
 - ADMIN_USER="gpadmin"
 - INSTALL_DIR="/arenadata"
 - EXPLAIN_ANALYZE="false"

@@ -52,7 +52,7 @@ check_variables()
 	fi
 	local count=$(grep "REPO_BRANCH=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "REPO_BRANCH=\"master\"" >> $MYVAR
+		echo "REPO_BRANCH=\"main\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "TPC_MODE=" $MYVAR | wc -l)
@@ -558,9 +558,9 @@ repo_init()
 		fi
 	fi
 
-	# REPO_BRANCH задаётся в tpc_variables.sh (по умолчанию master)
+	# REPO_BRANCH задаётся в tpc_variables.sh (по умолчанию main)
 	if [ -z "$REPO_BRANCH" ]; then
-		REPO_BRANCH="master"
+		REPO_BRANCH="main"
 	fi
 
 	if [ ! -d $INSTALL_DIR/$REPO ]; then

@@ -40,7 +40,7 @@ Installation
 ssh gpadmin@mdw; sudo bash
 
 2. Download the tpc.sh file
-curl https://raw.githubusercontent.com/ivanievlev/TPC/master/tpc.sh > tpc.sh
+curl https://raw.githubusercontent.com/ivanievlev/TPC/main/tpc.sh > tpc.sh
 chmod 755 tpc.sh
 
 ########################################################################################
