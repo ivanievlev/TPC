@@ -237,11 +237,6 @@ echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
 echo "############################################################################"
 echo ""
 
-# Revert pgconfig GUCs from a previous true run even if 02_init is skipped.
-if [ "${APPLY_PGCONFIG_PARAMETERS:-false}" != "true" ]; then
-	apply_pgconfig_parameters
-fi
-
 # RUN_COMPILE_TPC gates the compile step for either mode (00_compile_tpcds / 00_compile_tpch).
 if [ "$RUN_COMPILE_TPC" == "true" ]; then
 	rm -f $PWD/log/end_compile_tpcds.log
