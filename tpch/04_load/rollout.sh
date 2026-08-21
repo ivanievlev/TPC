@@ -22,7 +22,7 @@ echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
 
 purge_old_external_data
 if { [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; } && [ -z "$GEN_DATA_SCALE" ]; then
-	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path /arenadata/tpch_<scale>_${USE_EXTERNAL_FORMAT}/"
+	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path ${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/tpch_<scale>_${USE_EXTERNAL_FORMAT}/"
 	exit 1
 fi
 
@@ -91,8 +91,7 @@ start_gpfdist()
 		for i in $(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -A -t -c "select rank() over (partition by g.hostname order by g.datadir), g.hostname, g.datadir from gp_segment_configuration g where g.content >= 0 and g.role = 'p' order by g.hostname"); do
 			CHILD=$(echo $i | awk -F '|' '{print $1}')
 			EXT_HOST=$(echo $i | awk -F '|' '{print $2}')
-			GEN_DATA_PATH=$(echo $i | awk -F '|' '{print $3}')
-			GEN_DATA_PATH=$GEN_DATA_PATH/arenadata
+			GEN_DATA_PATH=$(gp_dat_dir "$(echo $i | awk -F '|' '{print $3}')")
 			PORT=$(($GPFDIST_PORT + $CHILD))
 			echo `whoami`
 			echo "executing on $EXT_HOST ./start_gpfdist.sh $PORT $GEN_DATA_PATH"
@@ -103,8 +102,7 @@ start_gpfdist()
 		for i in $(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -A -t -c "select rank() over (partition by g.hostname order by p.fselocation), g.hostname, p.fselocation as path from gp_segment_configuration g join pg_filespace_entry p on g.dbid = p.fsedbid join pg_tablespace t on t.spcfsoid = p.fsefsoid where g.content >= 0 and g.role = 'p' and t.spcname = 'pg_default' order by g.hostname"); do
 			CHILD=$(echo $i | awk -F '|' '{print $1}')
 			EXT_HOST=$(echo $i | awk -F '|' '{print $2}')
-			GEN_DATA_PATH=$(echo $i | awk -F '|' '{print $3}')
-			GEN_DATA_PATH=$GEN_DATA_PATH/arenadata
+			GEN_DATA_PATH=$(gp_dat_dir "$(echo $i | awk -F '|' '{print $3}')")
 			PORT=$(($GPFDIST_PORT + $CHILD))
 			echo "executing on $EXT_HOST ./start_gpfdist.sh $PORT $GEN_DATA_PATH"
 			ssh -n -f $EXT_HOST "bash -c 'cd ~/; ./start_gpfdist.sh $PORT $GEN_DATA_PATH'"
@@ -150,7 +148,7 @@ else
 		for p in $(seq 1 $PARALLEL); do
 			# включчаем и выключаем nullglob: если файла нет, то не оставлять литерал со звездочкой
 			shopt -s nullglob
-			files=($PGDATA/arenadata_$p/$table_name.tbl*)
+			files=($(pg_chunk_dat_dir "$PGDATA" "$p")/$table_name.tbl*)
 			shopt -u nullglob
 			for raw_filename in "${files[@]}"; do
 				if [[ -f $raw_filename && -s $raw_filename ]]; then

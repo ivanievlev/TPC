@@ -27,13 +27,14 @@ TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (p
 ## Installation
 
 ```
-mkdir -p /arenadata; cd /arenadata
 git clone https://github.com/ivanievlev/TPC.git
 cd TPC/
-chmod 777 $(find /arenadata -type d)
 
 # Run as a normal user with passwordless sudo (sudo -n true). Do not run as root /
 # via sudo ./tpc.sh — the script refuses root and uses sudo only for privileged steps.
+# All logs, segment_hosts.txt and step artifacts stay in this clone.
+# ADMIN_USER (gpadmin/postgres) must be able to cd/read/write this directory
+# (compile, load, ssh); 02_init fails if that is not true.
 
 <preliminary run to get paramater file>
 nohup ./tpc.sh > tpc.log 2>&1 < tpc.log &
@@ -71,7 +72,8 @@ Step logs go into subdirectories of `log/`:
 - REPO_URL="https://github.com/ivanievlev/TPC-DS"
 - REPO_BRANCH="main"
 - ADMIN_USER="gpadmin"
-- INSTALL_DIR="/arenadata"
+- DAT_FILE_SUBDIRECTORY_NAME="arenadata"
+- EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
 - EXPLAIN_ANALYZE="false"
 - RANDOM_DISTRIBUTION="false"
 - MULTI_USER_COUNT="10"
@@ -94,6 +96,23 @@ Step logs go into subdirectories of `log/`:
 	whatever is already in log/rollout_testing_log/rollout_testing_*.log.``
 
 ## New Arenadata parameters
+
+- DAT_FILE_SUBDIRECTORY_NAME="arenadata"
+
+	``Directory *name* (not a full path) under EXTERNAL_FILE_DIRECTORY_PATH for generated .dat files.
+	Default "arenadata". With EXTERNAL_FILE_DIRECTORY_PATH="/tmp" this yields:
+	gpfdist: /tmp/primary/gpseg0/arenadata (and /tmp/primary/gpsegN/arenadata on other primaries);
+	PostgreSQL: /tmp/arenadata_1, /tmp/arenadata_2, …
+	Former INSTALL_DIR="/arenadata" is migrated to this name automatically (basename of the old path).
+	The harness itself always runs in the git clone from which you started ./tpc.sh; log/ and segment_hosts.txt are created there.``
+
+- EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
+
+	``Absolute root for all generated data files (default "/tmp"). Combined with DAT_FILE_SUBDIRECTORY_NAME:
+	.dat for gpfdist: /tmp/primary/gpseg0/arenadata, /tmp/primary/gpseg1/arenadata, …;
+	.dat for PostgreSQL: /tmp/arenadata_1, /tmp/arenadata_2, …;
+	parquet/csv/json: /tmp/tpcds_<scale>_<format>/ (or tpch_…).
+	Must be an absolute path without '..'.``
 
 - PARTITION_EVERY_FACTOR="1"
     
@@ -161,7 +180,7 @@ Step logs go into subdirectories of `log/`:
 
 	``PostgreSQL/pg_duckdb only. Default "false" keeps the classic path: heap tables + COPY from .dat files.
 	If "parquet", "csv" or "json", step 03 creates views over local files (no heap tables / PK / indexes), and step 04 converts .dat files into that format under
-	/arenadata/tpcds_<GEN_DATA_SCALE>_<format>/<table>/ using pg_duckdb COPY ... WITH (FORMAT '<format>', ...).
+	<EXTERNAL_FILE_DIRECTORY_PATH>/tpcds_<GEN_DATA_SCALE>_<format>/<table>/ using pg_duckdb COPY ... WITH (FORMAT '<format>', ...).
 	Views use read_parquet() / read_csv() / read_json() accordingly.
 	No intermediate Postgres heap table is created for the load.``
 
@@ -192,7 +211,7 @@ Step logs go into subdirectories of `log/`:
 - PURGE_OLD_EXTERNAL_DATA="true"
 
 	``On step 04_load, when "true" (default), delete previous external data directories matching
-	/arenadata/tpcds_*_parquet, /arenadata/tpcds_*_csv and /arenadata/tpcds_*_json before loading.
+	<EXTERNAL_FILE_DIRECTORY_PATH>/tpcds_*_parquet, …_*_csv and …_*_json before loading.
 	This frees space left by earlier scale/format runs (e.g. tpcds_3_parquet). When "false", those
 	directories are left as-is (current tree may still be removed if TRUNCATE_BEFORE_LOAD=true and
 	USE_EXTERNAL_FORMAT is parquet/csv/json).``

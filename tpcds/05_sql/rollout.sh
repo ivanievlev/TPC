@@ -30,6 +30,8 @@ DUCKDB_THREADS=${36}
 DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${37}
 DUCKDB_THREADS_FOR_POSTGRES_SCAN=${38}
 SKIP_QUERIES_LIST=${41}
+DAT_FILE_SUBDIRECTORY_NAME=${42:-${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}}
+EXTERNAL_FILE_DIRECTORY_PATH=${43:-${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}}
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
 	echo "You must provide the scale as a parameter in terms of Gigabytes, true/false to run queries with EXPLAIN ANALYZE option, true/false to use random distrbution, multi-user count, and the number of sql iterations."
@@ -92,7 +94,7 @@ get_version
 if [[ "$VERSION" == *"gpdb"* ]]; then
   echo "DELETE_DAT_FILES_BEFORE_SQL: $DELETE_DAT_FILES_BEFORE_SQL"
   if [ "$DELETE_DAT_FILES_BEFORE_SQL" == "true" ]; then
-    gpssh -f /home/gpadmin/arenadata_configs/arenadata_segment_hosts.hosts -e 'rm -Rf /data1/primary/gpseg*/arenadata/*.dat'
+    gpssh -f /home/gpadmin/arenadata_configs/arenadata_segment_hosts.hosts -e "rm -Rf ${EXTERNAL_FILE_DIRECTORY_PATH}/primary/gpseg*/${DAT_FILE_SUBDIRECTORY_NAME}/*.dat ${EXTERNAL_FILE_DIRECTORY_PATH}/mirror/gpseg*/${DAT_FILE_SUBDIRECTORY_NAME}/*.dat"
   fi
 
   echo "Checking optimizer settings"

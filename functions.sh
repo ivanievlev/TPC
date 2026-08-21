@@ -20,6 +20,92 @@ ADMIN_USER=`whoami`
 ADMIN_HOME=$(eval echo ~$ADMIN_USER)
 MASTER_HOST=$(hostname -s)
 
+# .dat / gpfdist subdirectory name (not a clone path).
+# Combined with EXTERNAL_FILE_DIRECTORY_PATH (default /tmp):
+#   GP:  /tmp/primary/gpseg0/arenadata
+#   PG:  /tmp/arenadata_1
+if [ -z "${DAT_FILE_SUBDIRECTORY_NAME:-}" ]; then
+	DAT_FILE_SUBDIRECTORY_NAME="${42:-arenadata}"
+fi
+: "${DAT_FILE_SUBDIRECTORY_NAME:=arenadata}"
+
+if [ -z "${EXTERNAL_FILE_DIRECTORY_PATH:-}" ]; then
+	EXTERNAL_FILE_DIRECTORY_PATH="${43:-/tmp}"
+fi
+: "${EXTERNAL_FILE_DIRECTORY_PATH:=/tmp}"
+
+normalize_dat_file_subdirectory_name()
+{
+	local n="${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}"
+	n="${n#"${n%%[![:space:]]*}"}"
+	n="${n%"${n##*[![:space:]]}"}"
+	n="${n%/}"
+	# Allow leftover "/arenadata" (old INSTALL_DIR); reject nested paths.
+	if [[ "$n" == */* ]]; then
+		if [[ "$n" =~ ^/[^/]+$ ]]; then
+			n="${n#/}"
+		else
+			echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (got: ${DAT_FILE_SUBDIRECTORY_NAME})."
+			echo "Example: DAT_FILE_SUBDIRECTORY_NAME=\"arenadata\" → /tmp/primary/gpseg0/arenadata"
+			exit 1
+		fi
+	fi
+	if [ -z "$n" ] || [ "$n" = "." ] || [ "$n" = ".." ]; then
+		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (e.g. arenadata)."
+		exit 1
+	fi
+	if [[ ! "$n" =~ ^[A-Za-z0-9._-]+$ ]]; then
+		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME contains invalid characters: $n"
+		echo "Use a name like arenadata (no slashes or spaces)."
+		exit 1
+	fi
+	DAT_FILE_SUBDIRECTORY_NAME="$n"
+}
+
+normalize_external_file_directory_path()
+{
+	local p="${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}"
+	p="${p#"${p%%[![:space:]]*}"}"
+	p="${p%"${p##*[![:space:]]}"}"
+	p="${p%/}"
+	[ -z "$p" ] && p="/tmp"
+	if [[ "$p" != /* ]]; then
+		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute path (got: ${EXTERNAL_FILE_DIRECTORY_PATH:-empty})."
+		echo "Example: EXTERNAL_FILE_DIRECTORY_PATH=\"/tmp\" → /tmp/primary/gpseg0/arenadata"
+		exit 1
+	fi
+	if [[ "$p" == */../* || "$p" == */.. || "$p" == ../* || "$p" == .. ]]; then
+		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must not contain '..' (got: $p)."
+		exit 1
+	fi
+	EXTERNAL_FILE_DIRECTORY_PATH="$p"
+}
+
+# Greenplum: $EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg0/$DAT_FILE_SUBDIRECTORY_NAME
+# Uses last two components of the segment datadir (/data1/primary/gpseg0 → primary/gpseg0).
+gp_dat_dir()
+{
+	local datadir="$1"
+	local parent leaf
+	if [ -z "$datadir" ]; then
+		echo "ERROR: gp_dat_dir: empty segment datadir" >&2
+		exit 1
+	fi
+	parent=$(basename "$(dirname "$datadir")")
+	leaf=$(basename "$datadir")
+	echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${parent}/${leaf}/${DAT_FILE_SUBDIRECTORY_NAME}"
+}
+
+# PostgreSQL parallel chunks: $EXTERNAL_FILE_DIRECTORY_PATH/<name>_<child>
+pg_chunk_dat_dir()
+{
+	local child="$2"
+	echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_${child}"
+}
+
+normalize_dat_file_subdirectory_name
+normalize_external_file_directory_path
+
 # Flush OS page cache (pagecache + dentries + inodes). Requires passwordless sudo.
 drop_os_page_cache()
 {
@@ -623,6 +709,85 @@ require_ssh_to_segment_hosts()
 	if [ "$remote_count" -eq 0 ]; then
 		echo "All segment hosts are local; SSH is not required"
 	fi
+}
+
+# 02_init: ADMIN_USER must be able to compile, load, and ssh from this clone.
+require_admin_access_to_clone()
+{
+	local repo="$LOCAL_PWD"
+	local user="${ADMIN_USER:-$(whoami)}"
+	local me
+	local probe compile_ds compile_h
+	local f d
+
+	me=$(id -un)
+
+	echo "############################################################################"
+	echo "02_init: checking ADMIN_USER=$user can run compile/load/ssh from $repo"
+	echo "############################################################################"
+
+	if [ "$me" != "$user" ]; then
+		echo "ERROR: 02_init is running as $me, but ADMIN_USER=$user."
+		echo "$user must run compile/load/ssh from the clone directory $repo."
+		exit 1
+	fi
+
+	if [ ! -d "$repo" ]; then
+		echo "ERROR: clone directory $repo does not exist."
+		exit 1
+	fi
+
+	if ! { test -r "$repo/tpc.sh" && test -x "$repo/rollout.sh" && test -r "$repo/functions.sh"; }; then
+		echo "ERROR: ADMIN_USER=$user cannot read/execute TPC scripts in $repo"
+		exit 1
+	fi
+
+	mkdir -p "$repo/log" || {
+		echo "ERROR: ADMIN_USER=$user cannot create $repo/log"
+		exit 1
+	}
+	probe="$repo/log/.admin_write_probe_$$"
+	if ! touch "$probe" 2>/dev/null; then
+		echo "ERROR: ADMIN_USER=$user cannot write to clone $repo (needed for compile, log/, load)."
+		echo "Grant $user write access to $repo (compile dirs, log/, scripts)."
+		exit 1
+	fi
+	rm -f "$probe"
+
+	compile_ds="$repo/tpcds/00_compile_tpcds/tools"
+	compile_h="$repo/tpch/00_compile_tpch"
+	for d in "$compile_ds" "$compile_h"; do
+		if [ -d "$d" ] && [ ! -w "$d" ]; then
+			echo "ERROR: ADMIN_USER=$user cannot write $d (compile step)."
+			exit 1
+		fi
+	done
+
+	for f in \
+		"$repo/tpcds/04_load/rollout.sh" \
+		"$repo/tpcds/04_load/start_gpfdist.sh" \
+		"$repo/tpch/04_load/rollout.sh" \
+		"$repo/tpch/04_load/start_gpfdist.sh"
+	do
+		if [ -f "$f" ] && [ ! -r "$f" ]; then
+			echo "ERROR: ADMIN_USER=$user cannot read $f (load step)."
+			exit 1
+		fi
+	done
+
+	get_version
+	if [[ "$VERSION" == *"gpdb"* ]]; then
+		if [ ! -f "$repo/segment_hosts.txt" ] || ! grep -q '[^[:space:]]' "$repo/segment_hosts.txt" 2>/dev/null; then
+			echo "segment_hosts.txt missing; listing hosts from gp_segment_configuration"
+			create_hosts_file
+		fi
+		require_ssh_to_segment_hosts "$repo/segment_hosts.txt"
+	else
+		echo "PostgreSQL: SSH to segment hosts is not required"
+	fi
+
+	echo "ADMIN_USER=$user has access to compile/load/ssh from $repo"
+	echo ""
 }
 
 # Ensure a rollout_*.log exists and is readable for server-side COPY FROM (reports).

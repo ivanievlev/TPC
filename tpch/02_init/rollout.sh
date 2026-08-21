@@ -5,6 +5,7 @@ PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../../functions.sh
 source_bashrc
 source $PWD/../../parse_step_args.sh
+require_admin_access_to_clone
 echo "DBNAME=$DBNAME"
 IS_DB_EXIST=$(psql -d postgres -v ON_ERROR_STOP=1 -q -A -t -c "select count(*) from pg_database where datname = '$DBNAME'")
 echo "IS_DB_EXIST = $IS_DB_EXIST"

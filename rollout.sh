@@ -58,6 +58,8 @@ COLLECT_OS_DATA="${49:-true}"
 COLLECT_DATA_PERIOD="${50:-5s}"
 SKIP_QUERIES_LIST="${51}"
 TPC_MODE="${52:-TPC-DS}"
+DAT_FILE_SUBDIRECTORY_NAME="${53:-${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}}"
+EXTERNAL_FILE_DIRECTORY_PATH="${54:-${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}}"
 APPLY_PGCONFIG_PARAMETERS="${APPLY_PGCONFIG_PARAMETERS:-false}"
 
 init_tpc_mode
@@ -117,6 +119,16 @@ if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
 	SKIP_QUERIES_LIST=""
 fi
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
+
+if [ -z "$DAT_FILE_SUBDIRECTORY_NAME" ]; then
+	DAT_FILE_SUBDIRECTORY_NAME="arenadata"
+fi
+normalize_dat_file_subdirectory_name
+if [ -z "$EXTERNAL_FILE_DIRECTORY_PATH" ]; then
+	EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
+fi
+normalize_external_file_directory_path
+export DAT_FILE_SUBDIRECTORY_NAME EXTERNAL_FILE_DIRECTORY_PATH
 
 hive_on=$(echo "${EXTERNAL_HIVE_PARTITIONING}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
 case "$hive_on" in
@@ -232,6 +244,8 @@ echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT: $STATEMENT_TIMEOUT"
 echo "ADMIN_USER: $ADMIN_USER"
 echo "DBNAME: $DBNAME"
+echo "DAT_FILE_SUBDIRECTORY_NAME: $DAT_FILE_SUBDIRECTORY_NAME"
+echo "EXTERNAL_FILE_DIRECTORY_PATH: $EXTERNAL_FILE_DIRECTORY_PATH"
 echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
 echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
 echo "############################################################################"
@@ -304,5 +318,5 @@ while IFS= read -r i; do
 	echo "$i/rollout.sh"
 	# Close stdin so step scripts (ssh, tools, etc.) cannot consume the step list
 	# from this while-read loop (classic bash pitfall).
-	$i/rollout.sh $STEP_ARGS "$SKIP_QUERIES_LIST" </dev/null
+	$i/rollout.sh $STEP_ARGS "$SKIP_QUERIES_LIST" "$DAT_FILE_SUBDIRECTORY_NAME" "$EXTERNAL_FILE_DIRECTORY_PATH" </dev/null
 done < <(tpc_step_dirs "$PWD")

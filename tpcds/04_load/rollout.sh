@@ -29,10 +29,10 @@ echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
 echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
 echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
 
-# Free disk from previous parquet/csv/json runs (e.g. /arenadata/tpcds_3_parquet).
+# Free disk from previous parquet/csv/json runs (e.g. /tmp/tpcds_3_parquet).
 purge_old_external_data
 if { [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; } && [ -z "$GEN_DATA_SCALE" ]; then
-	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path /arenadata/tpcds_<scale>_${USE_EXTERNAL_FORMAT}/"
+	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path ${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/tpcds_<scale>_${USE_EXTERNAL_FORMAT}/"
 	exit 1
 fi
 
@@ -77,8 +77,7 @@ start_gpfdist()
 		for i in $(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -A -t -c "select rank() over(partition by g.hostname order by g.datadir), g.hostname, g.datadir from gp_segment_configuration g where g.content >= 0 and g.role = 'p' order by g.hostname"); do
 			CHILD=$(echo $i | awk -F '|' '{print $1}')
 			EXT_HOST=$(echo $i | awk -F '|' '{print $2}')
-			GEN_DATA_PATH=$(echo $i | awk -F '|' '{print $3}')
-			GEN_DATA_PATH=$GEN_DATA_PATH/arenadata
+			GEN_DATA_PATH=$(gp_dat_dir "$(echo $i | awk -F '|' '{print $3}')")
 			PORT=$(($GPFDIST_PORT + $CHILD))
 			echo "executing on $EXT_HOST ./start_gpfdist.sh $PORT $GEN_DATA_PATH"
 			ssh -n -f $EXT_HOST "bash -l -c 'cd ~/; ./start_gpfdist.sh $PORT $GEN_DATA_PATH'"
@@ -88,8 +87,7 @@ start_gpfdist()
 		for i in $(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -A -t -c "select rank() over (partition by g.hostname order by p.fselocation), g.hostname, p.fselocation as path from gp_segment_configuration g join pg_filespace_entry p on g.dbid = p.fsedbid join pg_tablespace t on t.spcfsoid = p.fsefsoid where g.content >= 0 and g.role = 'p' and t.spcname = 'pg_default' order by g.hostname"); do
 			CHILD=$(echo $i | awk -F '|' '{print $1}')
 			EXT_HOST=$(echo $i | awk -F '|' '{print $2}')
-			GEN_DATA_PATH=$(echo $i | awk -F '|' '{print $3}')
-			GEN_DATA_PATH=$GEN_DATA_PATH/arenadata
+			GEN_DATA_PATH=$(gp_dat_dir "$(echo $i | awk -F '|' '{print $3}')")
 			PORT=$(($GPFDIST_PORT + $CHILD))
 			echo "executing on $EXT_HOST ./start_gpfdist.sh $PORT $GEN_DATA_PATH"
 			ssh -n -f $EXT_HOST "bash -l -c 'cd ~/; ./start_gpfdist.sh $PORT $GEN_DATA_PATH'"
@@ -203,7 +201,7 @@ else
 		table_name=$(echo $short_i | awk -F '.' '{print $3}')
 		sz=0
 		for p in $(seq 1 $PARALLEL); do
-			raw_filename=$PGDATA/arenadata_$p/"$table_name"_"$p"_"$PARALLEL".dat
+			raw_filename=$(pg_chunk_dat_dir "$PGDATA" "$p")/"$table_name"_"$p"_"$PARALLEL".dat
 			if [[ -f $raw_filename && -s $raw_filename ]]; then
 				fsz=$(stat -c%s "$raw_filename")
 				sz=$((sz + fsz))
@@ -218,7 +216,7 @@ else
 	done
 
 	if [ "$total_size" -eq 0 ]; then
-		echo "ERROR: no non-empty .dat files found under $PGDATA/arenadata_*"
+		echo "ERROR: no non-empty .dat files found under ${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_*"
 		exit 1
 	fi
 
@@ -232,7 +230,7 @@ else
 	for entry in "${table_entries[@]}"; do
 		IFS='|' read -r table_name sql_file id schema_name <<<"$entry"
 		for p in $(seq 1 $PARALLEL); do
-			raw_filename=$PGDATA/arenadata_$p/"$table_name"_"$p"_"$PARALLEL".dat
+			raw_filename=$(pg_chunk_dat_dir "$PGDATA" "$p")/"$table_name"_"$p"_"$PARALLEL".dat
 			if [[ -f $raw_filename && -s $raw_filename ]]; then
 				pending+=("$table_name|$sql_file|$id|$schema_name|$raw_filename")
 			fi

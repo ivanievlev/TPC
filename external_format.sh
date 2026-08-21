@@ -27,26 +27,27 @@ external_ddl_dir()
 external_data_root()
 {
 	external_bench_defaults
-	echo "/arenadata/${TPC_DATA_PREFIX}_${GEN_DATA_SCALE}_${USE_EXTERNAL_FORMAT}"
+	echo "${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/${TPC_DATA_PREFIX}_${GEN_DATA_SCALE}_${USE_EXTERNAL_FORMAT}"
 }
 
-# Remove leftover /arenadata/{tpcds,tpch}_*_{parquet,csv,json} trees from previous runs.
+# Remove leftover $EXTERNAL_FILE_DIRECTORY_PATH/{tpcds,tpch}_*_{parquet,csv,json} trees from previous runs.
 purge_old_external_data()
 {
 	local d
 	local found=0
+	local root="${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}"
 	external_bench_defaults
 
 	if [ "${PURGE_OLD_EXTERNAL_DATA:-true}" != "true" ]; then
-		echo "PURGE_OLD_EXTERNAL_DATA=${PURGE_OLD_EXTERNAL_DATA:-false}: keeping existing /arenadata/{tpcds,tpch}_*_{parquet,csv,json}"
+		echo "PURGE_OLD_EXTERNAL_DATA=${PURGE_OLD_EXTERNAL_DATA:-false}: keeping existing ${root}/{tpcds,tpch}_*_{parquet,csv,json}"
 		return 0
 	fi
 
-	echo "PURGE_OLD_EXTERNAL_DATA=true: removing previous external data under /arenadata/{tpcds,tpch}_*_{parquet,csv,json}"
+	echo "PURGE_OLD_EXTERNAL_DATA=true: removing previous external data under ${root}/{tpcds,tpch}_*_{parquet,csv,json}"
 	shopt -s nullglob
 	for d in \
-		/arenadata/tpcds_*_parquet /arenadata/tpcds_*_csv /arenadata/tpcds_*_json \
-		/arenadata/tpch_*_parquet /arenadata/tpch_*_csv /arenadata/tpch_*_json
+		"${root}"/tpcds_*_parquet "${root}"/tpcds_*_csv "${root}"/tpcds_*_json \
+		"${root}"/tpch_*_parquet "${root}"/tpch_*_csv "${root}"/tpch_*_json
 	do
 		if [ -d "$d" ] || [ -e "$d" ]; then
 			found=1
@@ -246,10 +247,10 @@ external_dat_glob()
 	external_bench_defaults
 	case "${TPC_MODE}" in
 		TPC-H)
-			echo "${PGDATA}/arenadata_*/${table_name}.tbl*"
+			echo "${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}_*/${table_name}.tbl*"
 			;;
 		*)
-			echo "${PGDATA}/arenadata_*/${table_name}_[0-9]*_[0-9]*.dat"
+			echo "${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}_*/${table_name}_[0-9]*_[0-9]*.dat"
 			;;
 	esac
 }

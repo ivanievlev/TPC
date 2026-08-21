@@ -12,6 +12,7 @@
 #  27 DBNAME  28 STATEMENT_TIMEOUT
 #  29-34 external/duckdb/purge  35-38 duckdb session
 #  39 COLLECT_OS_DATA  40 COLLECT_DATA_PERIOD  41 SKIP_QUERIES_LIST
+#  42 DAT_FILE_SUBDIRECTORY_NAME  43 EXTERNAL_FILE_DIRECTORY_PATH
 
 GEN_DATA_SCALE=${1:-}
 EXPLAIN_ANALYZE=${2:-}
@@ -61,6 +62,14 @@ DUCKDB_THREADS_FOR_POSTGRES_SCAN=${38:-}
 COLLECT_OS_DATA=${39:-true}
 COLLECT_DATA_PERIOD=${40:-5s}
 SKIP_QUERIES_LIST=${41:-}
+DAT_FILE_SUBDIRECTORY_NAME=${42:-${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}}
+EXTERNAL_FILE_DIRECTORY_PATH=${43:-${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}}
+if type normalize_dat_file_subdirectory_name >/dev/null 2>&1; then
+	normalize_dat_file_subdirectory_name
+fi
+if type normalize_external_file_directory_path >/dev/null 2>&1; then
+	normalize_external_file_directory_path
+fi
 
 if [ -z "$STATEMENT_TIMEOUT" ]; then
 	STATEMENT_TIMEOUT="1h"

@@ -4,6 +4,8 @@ set -e
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../../functions.sh
 source_bashrc
+source $PWD/../../parse_step_args.sh
+require_admin_access_to_clone
 net_core_rmem=${11}
 net_core_wmem=${12}
 rg6_memory_limit=${13}

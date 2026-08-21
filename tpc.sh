@@ -70,9 +70,28 @@ check_variables()
                 echo "DBNAME=\"gp_tpcds\"" >> $MYVAR
                 new_variable=$(($new_variable + 1))
         fi
-	local count=$(grep "INSTALL_DIR=" $MYVAR | wc -l)
+	# INSTALL_DIR used to be the clone parent (/arenadata). Runtime is now
+	# this checkout; the name lives on as the gpfdist .dat subdirectory.
+	if grep -q '^INSTALL_DIR=' "$MYVAR" 2>/dev/null; then
+		if ! grep -q '^DAT_FILE_SUBDIRECTORY_NAME=' "$MYVAR" 2>/dev/null; then
+			_old_install_dir=$(grep '^INSTALL_DIR=' "$MYVAR" | tail -1 | sed 's/^INSTALL_DIR=//; s/^"//; s/"$//')
+			_dat_name=$(basename -- "${_old_install_dir:-arenadata}")
+			[ -z "$_dat_name" ] && _dat_name="arenadata"
+			echo "Renaming INSTALL_DIR -> DAT_FILE_SUBDIRECTORY_NAME=\"$_dat_name\" in $MYVAR"
+			echo "DAT_FILE_SUBDIRECTORY_NAME=\"$_dat_name\"" >> "$MYVAR"
+			unset _old_install_dir _dat_name
+		fi
+		sed -i '/^INSTALL_DIR=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "DAT_FILE_SUBDIRECTORY_NAME=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "INSTALL_DIR=\"/arenadata\"" >> $MYVAR
+		echo "DAT_FILE_SUBDIRECTORY_NAME=\"arenadata\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "EXTERNAL_FILE_DIRECTORY_PATH=" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "EXTERNAL_FILE_DIRECTORY_PATH=\"/tmp\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "EXPLAIN_ANALYZE=" $MYVAR | wc -l)
@@ -411,6 +430,50 @@ check_variables()
 	if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
 		SKIP_QUERIES_LIST=""
 	fi
+	if [ -z "${DAT_FILE_SUBDIRECTORY_NAME:-}" ]; then
+		DAT_FILE_SUBDIRECTORY_NAME="arenadata"
+	fi
+	_dat="$DAT_FILE_SUBDIRECTORY_NAME"
+	_dat="${_dat%/}"
+	if [[ "$_dat" == */* ]]; then
+		if [[ "$_dat" =~ ^/[^/]+$ ]]; then
+			_dat="${_dat#/}"
+		else
+			echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (got: $DAT_FILE_SUBDIRECTORY_NAME)."
+			echo "Example: DAT_FILE_SUBDIRECTORY_NAME=\"arenadata\" → /tmp/primary/gpseg0/arenadata"
+			exit 1
+		fi
+	fi
+	DAT_FILE_SUBDIRECTORY_NAME="$_dat"
+	unset _dat
+	if [ -z "$DAT_FILE_SUBDIRECTORY_NAME" ] || [ "$DAT_FILE_SUBDIRECTORY_NAME" = "." ] || [ "$DAT_FILE_SUBDIRECTORY_NAME" = ".." ]; then
+		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (e.g. arenadata)."
+		exit 1
+	fi
+	if [[ ! "$DAT_FILE_SUBDIRECTORY_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME contains invalid characters: $DAT_FILE_SUBDIRECTORY_NAME"
+		echo "Use a name like arenadata (no slashes or spaces)."
+		exit 1
+	fi
+	if [ -z "${EXTERNAL_FILE_DIRECTORY_PATH:-}" ]; then
+		EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
+	fi
+	_ext="$EXTERNAL_FILE_DIRECTORY_PATH"
+	_ext="${_ext#"${_ext%%[![:space:]]*}"}"
+	_ext="${_ext%"${_ext##*[![:space:]]}"}"
+	_ext="${_ext%/}"
+	[ -z "$_ext" ] && _ext="/tmp"
+	if [[ "$_ext" != /* ]]; then
+		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute path (got: $EXTERNAL_FILE_DIRECTORY_PATH)."
+		echo "Example: EXTERNAL_FILE_DIRECTORY_PATH=\"/tmp\" → /tmp/primary/gpseg0/arenadata"
+		exit 1
+	fi
+	if [[ "$_ext" == */../* || "$_ext" == */.. || "$_ext" == ../* || "$_ext" == .. ]]; then
+		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must not contain '..' (got: $_ext)."
+		exit 1
+	fi
+	EXTERNAL_FILE_DIRECTORY_PATH="$_ext"
+	unset _ext
 	# Inline validation (tpc.sh does not source functions.sh — avoid clobbering ADMIN_USER).
 	_skip_list=$(echo "${SKIP_QUERIES_LIST}" | tr -d '[:space:]')
 	if [ -n "$_skip_list" ]; then
@@ -509,8 +572,7 @@ yum_installs()
 	echo ""
 }
 
-# Uncommitted-change check is against the tree where ./tpc.sh was started,
-# which may differ from INSTALL_DIR/REPO (e.g. /opt/TPC vs /arenadata/TPC).
+# Uncommitted-change check against the clone where ./tpc.sh was started.
 require_launch_tree_clean()
 {
 	local launch dirty
@@ -530,196 +592,77 @@ require_launch_tree_clean()
 	fi
 }
 
+# Fetch/checkout REPO_BRANCH in this clone. No second tree, no overlay.
 repo_init()
 {
-	### Install repo ###
+	local tpc_hash_before tpc_hash_after internet_down
+
 	echo "############################################################################"
-	echo "Install the github repository."
+	echo "Using git clone at $PWD"
 	echo "############################################################################"
 	echo ""
 
 	require_launch_tree_clean
+
+	if [ -z "$REPO_BRANCH" ]; then
+		REPO_BRANCH="main"
+	fi
+
+	tpc_hash_before=$(cksum "$PWD/$MYCMD" | awk '{print $1" "$2}')
 
 	internet_down="0"
 	for j in $(curl google.com 2>&1 | grep "Couldn't resolve host"); do
 		internet_down="1"
 	done
 
-	if [ ! -d $INSTALL_DIR ]; then
-		if [ "$internet_down" -eq "1" ]; then
-			echo "Unable to continue because repo hasn't been downloaded and Internet is not available."
-			exit 1
+	if [ "$internet_down" -eq "0" ]; then
+		(cd "$PWD" && GIT_SSL_NO_VERIFY=true git fetch origin "$REPO_BRANCH" || true) || true
+	fi
+
+	(
+		cd "$PWD"
+		if git rev-parse --verify "$REPO_BRANCH" >/dev/null 2>&1; then
+			echo "Checking out local branch $REPO_BRANCH (keeping local commits)"
+			git checkout "$REPO_BRANCH"
+		elif git rev-parse --verify "origin/$REPO_BRANCH" >/dev/null 2>&1; then
+			echo "Local branch $REPO_BRANCH missing; creating from origin/$REPO_BRANCH"
+			git checkout -b "$REPO_BRANCH" "origin/$REPO_BRANCH"
 		else
-			echo ""
-			echo "Creating install dir"
-			echo "-------------------------------------------------------------------------"
-			run_priv mkdir -p $INSTALL_DIR
-			run_priv chown $ADMIN_USER $INSTALL_DIR
-		fi
-	fi
-
-	# REPO_BRANCH задаётся в tpc_variables.sh (по умолчанию main)
-	if [ -z "$REPO_BRANCH" ]; then
-		REPO_BRANCH="main"
-	fi
-
-	if [ ! -d $INSTALL_DIR/$REPO ]; then
-		if [ "$internet_down" -eq "1" ]; then
-			echo "Unable to continue because repo hasn't been downloaded and Internet is not available."
+			echo "ERROR: branch $REPO_BRANCH not found locally or on origin"
 			exit 1
-		else
-			echo ""
-			echo "Creating $REPO directory (branch: $REPO_BRANCH)"
-			echo "-------------------------------------------------------------------------"
-			run_priv mkdir -p $INSTALL_DIR/$REPO
-			run_priv chown $ADMIN_USER $INSTALL_DIR/$REPO
-			as_admin "cd $INSTALL_DIR; GIT_SSL_NO_VERIFY=true git clone --depth=1 -b $REPO_BRANCH $REPO_URL"
 		fi
-	else
-		# Do not steal the operator's clone (e.g. luka); only fix ownership if not writable.
-		if [ ! -w "$INSTALL_DIR/$REPO" ]; then
-			echo "Fixing permissions on $INSTALL_DIR/$REPO for $(id -un)..."
-			run_priv chown -R "$(id -un)" "$INSTALL_DIR/$REPO"
-		fi
+		echo "Now on branch: $(git rev-parse --abbrev-ref HEAD) @ $(git rev-parse --short HEAD)"
+	)
 
-		# Не сбрасываем локальные коммиты (никакого reset --hard / checkout -B origin/...).
-		# 1) грязное дерево запуска уже проверено в require_launch_tree_clean;
-		# 2) иначе checkout локальной REPO_BRANCH;
-		# 3) если локальной ветки нет — создать от origin/REPO_BRANCH.
-		# Если tpc.sh запущен из другого дерева (/opt/TPC), install-клон
-		# перезаписывается overlay — грязное дерево там ожидаемо, не стопаем.
-		local launch_src install_dst skip_dirty
-		launch_src=$(readlink -f "$PWD")
-		install_dst=$(readlink -f "$INSTALL_DIR/$REPO")
-		skip_dirty=0
-		if [ "$launch_src" != "$install_dst" ] && [ -f "$launch_src/tpc.sh" ]; then
-			skip_dirty=1
-			# Previous overlay left files owned by ADMIN_USER; take them back for git/rsync.
-			run_priv chown -R "$(id -un)" "$INSTALL_DIR/$REPO" || true
-			if [ -w "$INSTALL_DIR/$REPO" ] && [ -d "$INSTALL_DIR/$REPO/.git" ]; then
-				(cd "$INSTALL_DIR/$REPO" && git reset --hard HEAD && git clean -fd -e log -e tpc.log) >/dev/null 2>&1 || true
-			fi
-		fi
-
-		if [ "$skip_dirty" -eq 0 ]; then
-			local dirty
-			if [ -w "$INSTALL_DIR/$REPO" ]; then
-				dirty=$(cd "$INSTALL_DIR/$REPO" && git status --porcelain 2>/dev/null | wc -l)
-			else
-				dirty=$(as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --porcelain" 2>/dev/null | wc -l)
-			fi
-			if [ "$dirty" -gt "0" ]; then
-				echo "ERROR: repository $INSTALL_DIR/$REPO has uncommitted changes."
-				echo "Please commit (or stash) them before running tpc.sh, then re-run."
-				echo ""
-				if [ -w "$INSTALL_DIR/$REPO" ]; then
-					(cd "$INSTALL_DIR/$REPO" && git status --short) || true
-				else
-					as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --short" || true
-				fi
-				exit 1
-			fi
-		fi
-
-		_repo_git() { as_admin "cd \"$INSTALL_DIR/$REPO\"; $1"; }
-		if [ -w "$INSTALL_DIR/$REPO" ]; then
-			_repo_git() { bash -lc "cd \"$INSTALL_DIR/$REPO\"; $1"; }
-		fi
-
-		if [ "$internet_down" -eq "0" ]; then
-			_repo_git "GIT_SSL_NO_VERIFY=true git fetch origin $REPO_BRANCH || true" || true
-		fi
-
-		_repo_git "\
-			if git rev-parse --verify $REPO_BRANCH >/dev/null 2>&1; then \
-				echo \"Checking out local branch $REPO_BRANCH (keeping local commits)\"; \
-				git checkout $REPO_BRANCH; \
-			elif git rev-parse --verify origin/$REPO_BRANCH >/dev/null 2>&1; then \
-				echo \"Local branch $REPO_BRANCH missing; creating from origin/$REPO_BRANCH\"; \
-				git checkout -b $REPO_BRANCH origin/$REPO_BRANCH; \
-			else \
-				echo \"ERROR: branch $REPO_BRANCH not found locally or on origin\"; \
-				exit 1; \
-			fi; \
-			echo \"Now on branch: \$(git rev-parse --abbrev-ref HEAD) @ \$(git rev-parse --short HEAD)\""
-		unset -f _repo_git
-	fi
-
-	overlay_launch_tree
-}
-
-# Rollout always runs from INSTALL_DIR/REPO (e.g. /arenadata/TPC). If the
-# operator launched ./tpc.sh from another tree (e.g. /opt/TPC), copy that
-# tree over so local fixes (single-node cp instead of scp) actually run.
-overlay_launch_tree()
-{
-	local src dst
-	src=$(readlink -f "$PWD")
-	dst=$(readlink -f "$INSTALL_DIR/$REPO")
-	if [ -z "$src" ] || [ -z "$dst" ] || [ "$src" = "$dst" ]; then
-		return 0
-	fi
-	if [ ! -f "$src/tpc.sh" ] || [ ! -f "$src/functions.sh" ]; then
-		return 0
-	fi
-
-	echo "############################################################################"
-	echo "Overlay local tree: $src → $dst"
-	echo "############################################################################"
-
-	if [ -d "$dst/.git" ] && [ -w "$dst" ]; then
-		(cd "$dst" && git reset --hard HEAD && git clean -fd -e log -e tpc.log) >/dev/null 2>&1 || true
-	fi
-
-	if command -v rsync >/dev/null 2>&1; then
-		rsync -a \
-			--exclude '.git/' \
-			--exclude 'log/' \
-			--exclude 'tpc.log' \
-			--exclude 'segment_hosts.txt' \
-			--exclude '*.o' \
-			"$src/" "$dst/"
-	else
-		find "$src" -mindepth 1 -maxdepth 1 \
-			! -name '.git' ! -name 'log' ! -name 'tpc.log' ! -name 'segment_hosts.txt' \
-			-exec cp -a {} "$dst/" \;
-	fi
-
-	# Rollout runs as ADMIN_USER (postgres). rsync leaves files owned by the
-	# launcher, so compile's `rm -f *.o` hits "Permission denied" on the tools dir.
-	if [ -n "$ADMIN_USER" ]; then
-		echo "chown -R $ADMIN_USER $dst (keep .git for $(id -un))"
-		run_priv chown -R "$ADMIN_USER" "$dst"
-		if [ -d "$dst/.git" ]; then
-			run_priv chown -R "$(id -un)" "$dst/.git"
-		fi
-	fi
-	echo "Overlay complete."
-	echo ""
-}
-
-script_check()
-{
-	### Make sure the repo doesn't have a newer version of this script. ###
-	echo "############################################################################"
-	echo "Make sure this script is up to date."
-	echo "############################################################################"
-	echo ""
-	# Must be executed after the repo has been pulled
-	local d=`diff $PWD/$MYCMD $INSTALL_DIR/$REPO/$MYCMD | wc -l`
-
-	if [ "$d" -eq "0" ]; then
-		echo "$MYCMD script is up to date so continuing to TPC-DS."
-		echo ""
-	else
-		echo "$MYCMD script is NOT up to date."
-		echo ""
-		cp $INSTALL_DIR/$REPO/$MYCMD $PWD/$MYCMD
-		echo "After this script completes, restart the $MYCMD with this command:"
-		echo "./$MYCMD"
+	tpc_hash_after=$(cksum "$PWD/$MYCMD" | awk '{print $1" "$2}')
+	if [ "$tpc_hash_before" != "$tpc_hash_after" ]; then
+		echo "$MYCMD changed after checking out $REPO_BRANCH."
+		echo "Re-run: ./$MYCMD"
 		exit 1
 	fi
+}
 
+# ADMIN_USER must be able to cd/read/write this clone (compile, log/, load scripts).
+# Full compile/load/ssh check runs in 02_init; this is the gate so as_admin can start.
+require_admin_can_enter_clone()
+{
+	local repo="$PWD"
+	local err
+	local probe="log/.admin_write_probe_$$"
+
+	echo "############################################################################"
+	echo "Checking ADMIN_USER=$ADMIN_USER can use clone $repo"
+	echo "############################################################################"
+
+	if ! err=$(as_admin "cd \"$repo\" && test -r tpc.sh && test -x rollout.sh && test -r functions.sh && mkdir -p log && touch $probe && rm -f $probe" 2>&1); then
+		echo "ERROR: ADMIN_USER=$ADMIN_USER cannot run compile/load/ssh from clone $repo"
+		echo "$err"
+		echo "Grant $ADMIN_USER traverse+read+write on $repo (compile dirs, log/, scripts)."
+		echo "02_init will also refuse to continue until this is fixed."
+		exit 1
+	fi
+	echo "ADMIN_USER=$ADMIN_USER can enter $repo"
+	echo ""
 }
 
 echo_variables()
@@ -730,7 +673,8 @@ echo_variables()
 	echo "REPO_BRANCH: $REPO_BRANCH"
 	echo "ADMIN_USER: $ADMIN_USER"
 	echo "DBNAME: $DBNAME"
-	echo "INSTALL_DIR: $INSTALL_DIR"
+	echo "DAT_FILE_SUBDIRECTORY_NAME: $DAT_FILE_SUBDIRECTORY_NAME"
+	echo "EXTERNAL_FILE_DIRECTORY_PATH: $EXTERNAL_FILE_DIRECTORY_PATH"
 	echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
 	echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"
 	echo "EXCLUDE_HEAVY_QUERIES: $EXCLUDE_HEAVY_QUERIES"
@@ -815,7 +759,7 @@ kill_previous_processes()
 	fi
 
 	self=$$
-	repo="${INSTALL_DIR}/${REPO}"
+	repo="$PWD"
 	echo "KILL_PREVIOUS_PROCESSES=true: searching for leftover TPC-DS and TPC-H processes (excluding pid $self)..."
 
 	candidates=$(
@@ -939,18 +883,18 @@ archive_tpcds_log()
 	fi
 
 	prefix="${TPC_LOG_PREFIX:-tpcds}"
-	log_dir="$INSTALL_DIR/$REPO/log/archived_results"
+	log_dir="$PWD/log/archived_results"
 	mkdir -p "$log_dir"
 	ts=$(date +%Y%m%d_%H%M%S)
 	dest="$log_dir/${ts}_${prefix}_SF${GEN_DATA_SCALE}_${format}${duck_suffix}.log"
 
 	src=""
-	if [ -f "$INSTALL_DIR/$REPO/tpc.log" ]; then
-		src="$INSTALL_DIR/$REPO/tpc.log"
+	if [ -f "$PWD/tpc.log" ]; then
+		src="$PWD/tpc.log"
 	elif [ -f "./tpc.log" ]; then
 		src="./tpc.log"
-	elif [ -f "$INSTALL_DIR/$REPO/tpcds.log" ]; then
-		src="$INSTALL_DIR/$REPO/tpcds.log"
+	elif [ -f "$PWD/tpcds.log" ]; then
+		src="$PWD/tpcds.log"
 	elif [ -f "./tpcds.log" ]; then
 		src="./tpcds.log"
 	fi
@@ -973,7 +917,7 @@ check_variables
 yum_installs
 # Переключает репозиторий на ветку REPO_BRANCH из tpc_variables.sh
 repo_init
-script_check
+require_admin_can_enter_clone
 # Resolve TPC_MODE → schemas / step roots / log prefixes
 source "$PWD/mode.sh"
 init_tpc_mode
@@ -987,7 +931,7 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-as_admin "cd \"$INSTALL_DIR/$REPO\"; APPLY_PGCONFIG_PARAMETERS=\"${APPLY_PGCONFIG_PARAMETERS:-false}\" ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPC $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_SQL $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_OS_DATA \"$COLLECT_DATA_PERIOD\" \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\""
+as_admin "cd \"$PWD\"; APPLY_PGCONFIG_PARAMETERS=\"${APPLY_PGCONFIG_PARAMETERS:-false}\" ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPC $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_SQL $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_OS_DATA \"$COLLECT_DATA_PERIOD\" \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\" \"$DAT_FILE_SUBDIRECTORY_NAME\" \"$EXTERNAL_FILE_DIRECTORY_PATH\""
 
 # Final marker for tpc.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).

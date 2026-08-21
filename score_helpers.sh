@@ -50,21 +50,20 @@ score_multi_user_time_range()
 	[ -n "$start_u" ] && [ -n "$end_u" ] && echo "$start_u $end_u"
 }
 
-# Bytes of generated flat files (.dat / .tbl*) under PGDATA (and remote hosts if listed).
+# Bytes of generated flat files (.dat / .tbl*) under EXTERNAL_FILE_DIRECTORY_PATH (and remote hosts if listed).
 score_dat_bytes()
 {
 	local total=0 chunk hosts_file host
+	local root="${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}"
 
 	_sum_under() {
-		local root="$1"
-		[ -n "$root" ] && [ -d "$root" ] || { echo 0; return; }
-		find "$root" -type f \( -name '*.dat' -o -name '*.dat.gz' -o -name '*.tbl' -o -name '*.tbl.*' \) -printf '%s\n' 2>/dev/null \
+		local dir="$1"
+		[ -n "$dir" ] && [ -d "$dir" ] || { echo 0; return; }
+		find "$dir" -type f \( -name '*.dat' -o -name '*.dat.gz' -o -name '*.tbl' -o -name '*.tbl.*' \) -printf '%s\n' 2>/dev/null \
 			| awk '{s+=$1} END{print s+0}'
 	}
 
-	if [ -n "${PGDATA:-}" ] && [ -d "$PGDATA" ]; then
-		total=$(_sum_under "$PGDATA")
-	fi
+	total=$(_sum_under "$root")
 
 	hosts_file="${LOCAL_PWD:-}/segment_hosts.txt"
 	[ -f "$hosts_file" ] || hosts_file="$PWD/../../segment_hosts.txt"
@@ -73,7 +72,7 @@ score_dat_bytes()
 			[ -z "$host" ] && continue
 			[ "$host" = "$(hostname -s)" ] && continue
 			chunk=$(ssh -n -o ConnectTimeout=5 -o BatchMode=yes "$host" \
-				'if [ -n "${PGDATA:-}" ] && [ -d "$PGDATA" ]; then find "$PGDATA" -type f \( -name "*.dat" -o -name "*.dat.gz" -o -name "*.tbl" -o -name "*.tbl.*" \) -printf "%s\n" 2>/dev/null | awk "{s+=\$1} END{print s+0}"; else echo 0; fi' \
+				"if [ -d '$root' ]; then find '$root' -type f \\( -name '*.dat' -o -name '*.dat.gz' -o -name '*.tbl' -o -name '*.tbl.*' \\) -printf '%s\\n' 2>/dev/null | awk '{s+=\$1} END{print s+0}'; else echo 0; fi" \
 				2>/dev/null || echo 0)
 			chunk=$(echo "$chunk" | tr -d '[:space:]')
 			[ -z "$chunk" ] && chunk=0
