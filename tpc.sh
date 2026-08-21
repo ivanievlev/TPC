@@ -843,23 +843,186 @@ WHERE datname = ANY(string_to_array('$dbs', ','))
 	echo "Done killing leftover TPC-DS / TPC-H processes."
 }
 
+# Hostnames for cluster-wide OS tweaks (jumbo frames / sudoers).
+cluster_host_list()
+{
+	local hosts_file="/home/${ADMIN_USER}/arenadata_configs/arenadata_all_hosts.hosts"
+	local hosts
+	if hosts=$(as_admin "test -r \"$hosts_file\" && cat \"$hosts_file\"") && [ -n "$hosts" ]; then
+		printf '%s\n' "$hosts"
+		return 0
+	fi
+	if hosts=$(as_admin "psql -d postgres -v ON_ERROR_STOP=1 -tAc \"SELECT DISTINCT hostname FROM gp_segment_configuration ORDER BY 1\"") && [ -n "$hosts" ]; then
+		printf '%s\n' "$hosts"
+		return 0
+	fi
+	return 1
+}
+
+# True if $1 is this machine (short name / FQDN / localhost).
+tpc_is_local_host()
+{
+	local host="$1"
+	local host_short local_short
+
+	[ -z "$host" ] && return 1
+	host=$(echo "$host" | tr -d '[:space:]')
+	host_short=$(echo "$host" | awk -F. '{print $1}')
+	local_short=$(hostname -s 2>/dev/null || true)
+
+	case "$host" in
+		localhost|localhost.localdomain|127.0.0.1|::1) return 0 ;;
+	esac
+	if [ -n "$local_short" ]; then
+		if [ "$host" = "$local_short" ] || [ "$host_short" = "$local_short" ]; then
+			return 0
+		fi
+	fi
+	if [ -n "${HOSTNAME:-}" ] && [ "$host" = "$HOSTNAME" ]; then
+		return 0
+	fi
+	return 1
+}
+
+# BatchMode: never prompt (nohup). accept-new: first-seen host keys without a TTY hang.
+CALLER_SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+
+ensure_caller_ssh_key()
+{
+	mkdir -p "$HOME/.ssh"
+	chmod 700 "$HOME/.ssh"
+	if [ ! -f "$HOME/.ssh/id_ed25519.pub" ] && [ ! -f "$HOME/.ssh/id_rsa.pub" ]; then
+		ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519" -q
+	fi
+}
+
+caller_ssh_pubkey()
+{
+	if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
+		cat "$HOME/.ssh/id_ed25519.pub"
+	else
+		cat "$HOME/.ssh/id_rsa.pub"
+	fi
+}
+
+# ADMIN_USER can SSH to segments; try to drop the tpc.sh caller's pubkey into that account's authorized_keys.
+install_caller_ssh_key_via_admin()
+{
+	local host="$1"
+	local caller="$2"
+	local pubkey="$3"
+
+	as_admin "ssh -n $CALLER_SSH_OPTS \"$host\" \"umask 077; mkdir -p /home/$caller/.ssh && (grep -qxF '$pubkey' /home/$caller/.ssh/authorized_keys 2>/dev/null || echo '$pubkey' >> /home/$caller/.ssh/authorized_keys) && chown -R $caller:$caller /home/$caller/.ssh && chmod 700 /home/$caller/.ssh && chmod 600 /home/$caller/.ssh/authorized_keys\""
+}
+
+# On $1, as the tpc.sh caller: sudo bash -c 'echo "<ADMIN_USER> ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers'
+grant_admin_nopasswd_sudo_on_host()
+{
+	local host="$1"
+	local caller line cmd out pubkey
+	caller=$(id -un)
+	line="${ADMIN_USER} ALL=(ALL) NOPASSWD:ALL"
+	cmd="sudo -n bash -c 'grep -RqxF \"$line\" /etc/sudoers /etc/sudoers.d 2>/dev/null || echo \"$line\" >> /etc/sudoers'"
+
+	if tpc_is_local_host "$host"; then
+		if ! out=$(sudo -n bash -c "grep -RqxF \"$line\" /etc/sudoers /etc/sudoers.d 2>/dev/null || echo \"$line\" >> /etc/sudoers" 2>&1); then
+			echo "ERROR: $caller cannot add sudoers on local host $host:"
+			echo "$out"
+			return 1
+		fi
+		echo "  $host: $line (local sudo as $caller)"
+		return 0
+	fi
+
+	if ! ssh -n $CALLER_SSH_OPTS "$host" "true" 2>/dev/null; then
+		echo "  $host: no SSH as $caller; installing pubkey via $ADMIN_USER..."
+		pubkey=$(caller_ssh_pubkey)
+		if ! out=$(install_caller_ssh_key_via_admin "$host" "$caller" "$pubkey" 2>&1); then
+			echo "ERROR: cannot install $caller SSH key on $host:"
+			echo "$out"
+			echo "ERROR: $caller must ssh $host (BatchMode) and have passwordless sudo there."
+			return 1
+		fi
+	fi
+
+	if ! out=$(ssh -n $CALLER_SSH_OPTS "$host" "$cmd" 2>&1); then
+		echo "ERROR: cannot add sudoers on $host as $caller:"
+		echo "$out"
+		echo "Need: ssh $caller@$host && sudo -n bash -c 'echo \"$line\" >> /etc/sudoers'"
+		return 1
+	fi
+	echo "  $host: $line (ssh as $caller)"
+	return 0
+}
+
 make_prerequisites()
 {
-	
-	echo "Setting mtu 9000 on all hosts..."
-	as_admin "gpssh -f /home/gpadmin/arenadata_configs/arenadata_all_hosts.hosts -v -e 'sudo ip link set mtu 9000 dev $NETWORK_INTERFACE_JUMBOFRAME'"
+	local iface="${NETWORK_INTERFACE_JUMBOFRAME}"
+	local host out failed=0 hosts
+	local caller
+	caller=$(id -un)
+
+	case "$iface" in
+		""|*[!a-zA-Z0-9._-]*)
+			echo "ERROR: NETWORK_INTERFACE_JUMBOFRAME='${iface}' is empty or invalid"
+			exit 1
+			;;
+	esac
+
+	if ! hosts=$(cluster_host_list); then
+		echo "ERROR: cannot list cluster hosts (arenadata_all_hosts.hosts / gp_segment_configuration)."
+		exit 1
+	fi
+
+	echo "Granting ${ADMIN_USER} passwordless sudo on all hosts as ${caller}..."
+	ensure_caller_ssh_key
+	while IFS= read -r host || [ -n "$host" ]; do
+		host=$(echo "$host" | tr -d '[:space:]')
+		[ -z "$host" ] && continue
+		if ! grant_admin_nopasswd_sudo_on_host "$host"; then
+			failed=1
+		fi
+	done <<< "$hosts"
+	if [ "$failed" -ne 0 ]; then
+		echo "ERROR: could not grant ${ADMIN_USER} NOPASSWD sudo on all hosts."
+		exit 1
+	fi
+
+	echo "Setting mtu 9000 on ${iface} on all hosts..."
+
+	# gpssh + sudo hangs forever on a password prompt (nohup has no TTY).
+	# BatchMode ssh + sudo -n fail immediately if SSH keys or NOPASSWD sudo are missing.
+	while IFS= read -r host || [ -n "$host" ]; do
+		host=$(echo "$host" | tr -d '[:space:]')
+		[ -z "$host" ] && continue
+		echo "  $host:"
+		if ! out=$(as_admin "ssh -n -o BatchMode=yes -o ConnectTimeout=10 \"$host\" \"sudo -n ip link set mtu 9000 dev $iface && ip -o link show $iface\"" 2>&1); then
+			echo "ERROR: cannot set mtu 9000 on $host ($iface)."
+			echo "$out"
+			echo "SSH as $ADMIN_USER to $host is not enough: passwordless sudo is required there"
+			echo "  (sudo -n ip link set mtu 9000 dev $iface). On $host add to sudoers:"
+			echo "  $ADMIN_USER ALL=(ALL) NOPASSWD:ALL"
+			failed=1
+		else
+			echo "$out"
+		fi
+	done <<< "$hosts"
+
+	if [ "$failed" -ne 0 ]; then
+		echo "ERROR: jumbo frames (mtu 9000) were not applied on all hosts."
+		echo "Fix NOPASSWD sudo for $ADMIN_USER on the hosts above, or set MAKE_PREREQUISITES=false."
+		exit 1
+	fi
 
 	echo "Checking if cluster is started..."
 	IS_CLUSTER_STARTED=$(as_admin "gpstate -e | grep 'All segments are running normally'" | wc -l)
-        echo "IS_CLUSTER_STARTED = $IS_CLUSTER_STARTED"
+	echo "IS_CLUSTER_STARTED = $IS_CLUSTER_STARTED"
 
-        if [[ "$IS_CLUSTER_STARTED" == "0" ]]; then
-
-                echo "Cluster is stopped. Starting the cluster..."
+	if [[ "$IS_CLUSTER_STARTED" == "0" ]]; then
+		echo "Cluster is stopped. Starting the cluster..."
 		echo "gpstart -a"
-                as_admin "gpstart -a"
-        fi
-
+		as_admin "gpstart -a"
+	fi
 }
 
 run_after_rollout()
