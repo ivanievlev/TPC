@@ -509,6 +509,27 @@ yum_installs()
 	echo ""
 }
 
+# Uncommitted-change check is against the tree where ./tpc.sh was started,
+# which may differ from INSTALL_DIR/REPO (e.g. /opt/TPC vs /arenadata/TPC).
+require_launch_tree_clean()
+{
+	local launch dirty
+	launch=$(readlink -f "$PWD")
+	if [ ! -d "$launch/.git" ]; then
+		echo "ERROR: $launch is not a git repository."
+		echo "tpc.sh must be started from a git checkout so uncommitted changes can be detected."
+		exit 1
+	fi
+	dirty=$(cd "$launch" && git status --porcelain 2>/dev/null | wc -l)
+	if [ "$dirty" -gt "0" ]; then
+		echo "ERROR: repository $launch has uncommitted changes."
+		echo "Please commit (or stash) them before running tpc.sh, then re-run."
+		echo ""
+		(cd "$launch" && git status --short) || true
+		exit 1
+	fi
+}
+
 repo_init()
 {
 	### Install repo ###
@@ -516,6 +537,8 @@ repo_init()
 	echo "Install the github repository."
 	echo "############################################################################"
 	echo ""
+
+	require_launch_tree_clean
 
 	internet_down="0"
 	for j in $(curl google.com 2>&1 | grep "Couldn't resolve host"); do
@@ -560,10 +583,11 @@ repo_init()
 		fi
 
 		# Не сбрасываем локальные коммиты (никакого reset --hard / checkout -B origin/...).
-		# 1) при грязном дереве — стоп; 2) иначе checkout локальной REPO_BRANCH;
+		# 1) грязное дерево запуска уже проверено в require_launch_tree_clean;
+		# 2) иначе checkout локальной REPO_BRANCH;
 		# 3) если локальной ветки нет — создать от origin/REPO_BRANCH.
 		# Если tpc.sh запущен из другого дерева (/opt/TPC), install-клон
-		# перезаписывается overlay — грязное дерево там ожидаемо.
+		# перезаписывается overlay — грязное дерево там ожидаемо, не стопаем.
 		local launch_src install_dst skip_dirty
 		launch_src=$(readlink -f "$PWD")
 		install_dst=$(readlink -f "$INSTALL_DIR/$REPO")
@@ -577,22 +601,24 @@ repo_init()
 			fi
 		fi
 
-		local dirty
-		if [ -w "$INSTALL_DIR/$REPO" ]; then
-			dirty=$(cd "$INSTALL_DIR/$REPO" && git status --porcelain 2>/dev/null | wc -l)
-		else
-			dirty=$(as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --porcelain" 2>/dev/null | wc -l)
-		fi
-		if [ "$skip_dirty" -eq 0 ] && [ "$dirty" -gt "0" ]; then
-			echo "ERROR: repository $INSTALL_DIR/$REPO has uncommitted changes."
-			echo "Please commit (or stash) them before running tpc.sh, then re-run."
-			echo ""
+		if [ "$skip_dirty" -eq 0 ]; then
+			local dirty
 			if [ -w "$INSTALL_DIR/$REPO" ]; then
-				(cd "$INSTALL_DIR/$REPO" && git status --short) || true
+				dirty=$(cd "$INSTALL_DIR/$REPO" && git status --porcelain 2>/dev/null | wc -l)
 			else
-				as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --short" || true
+				dirty=$(as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --porcelain" 2>/dev/null | wc -l)
 			fi
-			exit 1
+			if [ "$dirty" -gt "0" ]; then
+				echo "ERROR: repository $INSTALL_DIR/$REPO has uncommitted changes."
+				echo "Please commit (or stash) them before running tpc.sh, then re-run."
+				echo ""
+				if [ -w "$INSTALL_DIR/$REPO" ]; then
+					(cd "$INSTALL_DIR/$REPO" && git status --short) || true
+				else
+					as_admin "cd \"$INSTALL_DIR/$REPO\" && git status --short" || true
+				fi
+				exit 1
+			fi
 		fi
 
 		_repo_git() { as_admin "cd \"$INSTALL_DIR/$REPO\"; $1"; }
