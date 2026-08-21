@@ -887,6 +887,13 @@ tpc_is_local_host()
 # BatchMode: never prompt (nohup). accept-new: first-seen host keys without a TTY hang.
 CALLER_SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
 
+admin_ssh()
+{
+	local host="$1"
+	shift
+	sudo -n -u "$ADMIN_USER" -H ssh -n $CALLER_SSH_OPTS "$host" "$@"
+}
+
 ensure_caller_ssh_key()
 {
 	mkdir -p "$HOME/.ssh"
@@ -896,30 +903,13 @@ ensure_caller_ssh_key()
 	fi
 }
 
-caller_ssh_pubkey()
-{
-	if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
-		cat "$HOME/.ssh/id_ed25519.pub"
-	else
-		cat "$HOME/.ssh/id_rsa.pub"
-	fi
-}
-
-# ADMIN_USER can SSH to segments; try to drop the tpc.sh caller's pubkey into that account's authorized_keys.
-install_caller_ssh_key_via_admin()
-{
-	local host="$1"
-	local caller="$2"
-	local pubkey="$3"
-
-	as_admin "ssh -n $CALLER_SSH_OPTS \"$host\" \"umask 077; mkdir -p /home/$caller/.ssh && (grep -qxF '$pubkey' /home/$caller/.ssh/authorized_keys 2>/dev/null || echo '$pubkey' >> /home/$caller/.ssh/authorized_keys) && chown -R $caller:$caller /home/$caller/.ssh && chmod 700 /home/$caller/.ssh && chmod 600 /home/$caller/.ssh/authorized_keys\""
-}
-
 # On $1, as the tpc.sh caller: sudo bash -c 'echo "<ADMIN_USER> ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers'
+# Do not mkdir /home/<caller> via ADMIN_USER — that home is typically 750 and mkdir -p
+# then errors with "cannot create directory /home/<caller>".
 grant_admin_nopasswd_sudo_on_host()
 {
 	local host="$1"
-	local caller line cmd out pubkey
+	local caller line cmd out
 	caller=$(id -un)
 	line="${ADMIN_USER} ALL=(ALL) NOPASSWD:ALL"
 	cmd="sudo -n bash -c 'grep -RqxF \"$line\" /etc/sudoers /etc/sudoers.d 2>/dev/null || echo \"$line\" >> /etc/sudoers'"
@@ -934,25 +924,30 @@ grant_admin_nopasswd_sudo_on_host()
 		return 0
 	fi
 
-	if ! ssh -n $CALLER_SSH_OPTS "$host" "true" 2>/dev/null; then
-		echo "  $host: no SSH as $caller; installing pubkey via $ADMIN_USER..."
-		pubkey=$(caller_ssh_pubkey)
-		if ! out=$(install_caller_ssh_key_via_admin "$host" "$caller" "$pubkey" 2>&1); then
-			echo "ERROR: cannot install $caller SSH key on $host:"
+	if ssh -n $CALLER_SSH_OPTS "$host" "true" 2>/dev/null; then
+		if ! out=$(ssh -n $CALLER_SSH_OPTS "$host" "$cmd" 2>&1); then
+			echo "ERROR: cannot add sudoers on $host as $caller:"
 			echo "$out"
-			echo "ERROR: $caller must ssh $host (BatchMode) and have passwordless sudo there."
 			return 1
 		fi
+		echo "  $host: $line (ssh as $caller)"
+		return 0
 	fi
 
-	if ! out=$(ssh -n $CALLER_SSH_OPTS "$host" "$cmd" 2>&1); then
-		echo "ERROR: cannot add sudoers on $host as $caller:"
-		echo "$out"
-		echo "Need: ssh $caller@$host && sudo -n bash -c 'echo \"$line\" >> /etc/sudoers'"
-		return 1
+	echo "  $host: no SSH as $caller; trying sudoers via $ADMIN_USER SSH..."
+	if out=$(admin_ssh "$host" "$cmd" 2>&1); then
+		echo "  $host: $line (ssh as $ADMIN_USER)"
+		return 0
 	fi
-	echo "  $host: $line (ssh as $caller)"
-	return 0
+
+	echo "ERROR: cannot add sudoers on $host."
+	echo "$out"
+	echo "$caller cannot ssh $host (BatchMode)."
+	echo "$ADMIN_USER can ssh $host but has no passwordless sudo there (sudo -n failed)."
+	echo "$ADMIN_USER cannot write /home/$caller (typically mode 750), so the $caller SSH key cannot be installed."
+	echo "On $host, as a user with sudo, run:"
+	echo "  sudo bash -c 'echo \"$line\" >> /etc/sudoers'"
+	return 1
 }
 
 make_prerequisites()
