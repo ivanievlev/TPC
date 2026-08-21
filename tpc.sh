@@ -843,7 +843,7 @@ WHERE datname = ANY(string_to_array('$dbs', ','))
 	echo "Done killing leftover TPC-DS / TPC-H processes."
 }
 
-# Hostnames for cluster-wide OS tweaks (jumbo frames / sudoers).
+# Hostnames for cluster-wide OS tweaks (jumbo frames).
 cluster_host_list()
 {
 	local hosts_file="/home/${ADMIN_USER}/arenadata_configs/arenadata_all_hosts.hosts"
@@ -859,103 +859,10 @@ cluster_host_list()
 	return 1
 }
 
-# True if $1 is this machine (short name / FQDN / localhost).
-tpc_is_local_host()
-{
-	local host="$1"
-	local host_short local_short
-
-	[ -z "$host" ] && return 1
-	host=$(echo "$host" | tr -d '[:space:]')
-	host_short=$(echo "$host" | awk -F. '{print $1}')
-	local_short=$(hostname -s 2>/dev/null || true)
-
-	case "$host" in
-		localhost|localhost.localdomain|127.0.0.1|::1) return 0 ;;
-	esac
-	if [ -n "$local_short" ]; then
-		if [ "$host" = "$local_short" ] || [ "$host_short" = "$local_short" ]; then
-			return 0
-		fi
-	fi
-	if [ -n "${HOSTNAME:-}" ] && [ "$host" = "$HOSTNAME" ]; then
-		return 0
-	fi
-	return 1
-}
-
-# BatchMode: never prompt (nohup). accept-new: first-seen host keys without a TTY hang.
-CALLER_SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
-
-admin_ssh()
-{
-	local host="$1"
-	shift
-	sudo -n -u "$ADMIN_USER" -H ssh -n $CALLER_SSH_OPTS "$host" "$@"
-}
-
-ensure_caller_ssh_key()
-{
-	mkdir -p "$HOME/.ssh"
-	chmod 700 "$HOME/.ssh"
-	if [ ! -f "$HOME/.ssh/id_ed25519.pub" ] && [ ! -f "$HOME/.ssh/id_rsa.pub" ]; then
-		ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519" -q
-	fi
-}
-
-# On $1, as the tpc.sh caller: sudo bash -c 'echo "<ADMIN_USER> ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers'
-# Do not mkdir /home/<caller> via ADMIN_USER — that home is typically 750 and mkdir -p
-# then errors with "cannot create directory /home/<caller>".
-grant_admin_nopasswd_sudo_on_host()
-{
-	local host="$1"
-	local caller line cmd out
-	caller=$(id -un)
-	line="${ADMIN_USER} ALL=(ALL) NOPASSWD:ALL"
-	cmd="sudo -n bash -c 'grep -RqxF \"$line\" /etc/sudoers /etc/sudoers.d 2>/dev/null || echo \"$line\" >> /etc/sudoers'"
-
-	if tpc_is_local_host "$host"; then
-		if ! out=$(sudo -n bash -c "grep -RqxF \"$line\" /etc/sudoers /etc/sudoers.d 2>/dev/null || echo \"$line\" >> /etc/sudoers" 2>&1); then
-			echo "ERROR: $caller cannot add sudoers on local host $host:"
-			echo "$out"
-			return 1
-		fi
-		echo "  $host: $line (local sudo as $caller)"
-		return 0
-	fi
-
-	if ssh -n $CALLER_SSH_OPTS "$host" "true" 2>/dev/null; then
-		if ! out=$(ssh -n $CALLER_SSH_OPTS "$host" "$cmd" 2>&1); then
-			echo "ERROR: cannot add sudoers on $host as $caller:"
-			echo "$out"
-			return 1
-		fi
-		echo "  $host: $line (ssh as $caller)"
-		return 0
-	fi
-
-	echo "  $host: no SSH as $caller; trying sudoers via $ADMIN_USER SSH..."
-	if out=$(admin_ssh "$host" "$cmd" 2>&1); then
-		echo "  $host: $line (ssh as $ADMIN_USER)"
-		return 0
-	fi
-
-	echo "ERROR: cannot add sudoers on $host."
-	echo "$out"
-	echo "$caller cannot ssh $host (BatchMode)."
-	echo "$ADMIN_USER can ssh $host but has no passwordless sudo there (sudo -n failed)."
-	echo "$ADMIN_USER cannot write /home/$caller (typically mode 750), so the $caller SSH key cannot be installed."
-	echo "On $host, as a user with sudo, run:"
-	echo "  sudo bash -c 'echo \"$line\" >> /etc/sudoers'"
-	return 1
-}
-
 make_prerequisites()
 {
 	local iface="${NETWORK_INTERFACE_JUMBOFRAME}"
 	local host out failed=0 hosts
-	local caller
-	caller=$(id -un)
 
 	case "$iface" in
 		""|*[!a-zA-Z0-9._-]*)
@@ -966,20 +873,6 @@ make_prerequisites()
 
 	if ! hosts=$(cluster_host_list); then
 		echo "ERROR: cannot list cluster hosts (arenadata_all_hosts.hosts / gp_segment_configuration)."
-		exit 1
-	fi
-
-	echo "Granting ${ADMIN_USER} passwordless sudo on all hosts as ${caller}..."
-	ensure_caller_ssh_key
-	while IFS= read -r host || [ -n "$host" ]; do
-		host=$(echo "$host" | tr -d '[:space:]')
-		[ -z "$host" ] && continue
-		if ! grant_admin_nopasswd_sudo_on_host "$host"; then
-			failed=1
-		fi
-	done <<< "$hosts"
-	if [ "$failed" -ne 0 ]; then
-		echo "ERROR: could not grant ${ADMIN_USER} NOPASSWD sudo on all hosts."
 		exit 1
 	fi
 
@@ -995,8 +888,7 @@ make_prerequisites()
 			echo "ERROR: cannot set mtu 9000 on $host ($iface)."
 			echo "$out"
 			echo "SSH as $ADMIN_USER to $host is not enough: passwordless sudo is required there"
-			echo "  (sudo -n ip link set mtu 9000 dev $iface). On $host add to sudoers:"
-			echo "  $ADMIN_USER ALL=(ALL) NOPASSWD:ALL"
+			echo "  (sudo -n ip link set mtu 9000 dev $iface)."
 			failed=1
 		else
 			echo "$out"
@@ -1005,7 +897,7 @@ make_prerequisites()
 
 	if [ "$failed" -ne 0 ]; then
 		echo "ERROR: jumbo frames (mtu 9000) were not applied on all hosts."
-		echo "Fix NOPASSWD sudo for $ADMIN_USER on the hosts above, or set MAKE_PREREQUISITES=false."
+		echo "Ensure $ADMIN_USER has NOPASSWD sudo on the hosts above, or set MAKE_PREREQUISITES=false."
 		exit 1
 	fi
 
