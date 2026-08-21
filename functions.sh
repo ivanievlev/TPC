@@ -775,6 +775,8 @@ pgconfig_detect_drive_type()
 
 # shared_buffers / max_connections / wal_buffers and similar only apply after restart.
 # ALTER SYSTEM writes postgresql.auto.conf; pg_reload_conf() is not enough.
+# Use stop+start with an absolute -D. `pg_ctl restart` reuses postmaster.opts, which
+# may contain a relative -D (e.g. "lukavega") resolved against the TPC cwd.
 pgconfig_restart_postgres()
 {
 	local pgdata pg_ctl_bin postgres_bin
@@ -783,6 +785,9 @@ pgconfig_restart_postgres()
 	if [ -z "$pgdata" ]; then
 		echo "ERROR: could not determine data_directory for PostgreSQL restart"
 		return 1
+	fi
+	if command -v readlink >/dev/null 2>&1; then
+		pgdata=$(readlink -f "$pgdata")
 	fi
 
 	pg_ctl_bin=$(command -v pg_ctl 2>/dev/null || true)
@@ -797,8 +802,10 @@ pgconfig_restart_postgres()
 		return 1
 	fi
 
-	echo "APPLY_PGCONFIG_PARAMETERS: $pg_ctl_bin -D $pgdata restart -w -t 120 -m fast"
-	"$pg_ctl_bin" -D "$pgdata" restart -w -t 120 -m fast
+	echo "APPLY_PGCONFIG_PARAMETERS: $pg_ctl_bin -D $pgdata stop -w -t 120 -m fast"
+	"$pg_ctl_bin" -D "$pgdata" stop -w -t 120 -m fast
+	echo "APPLY_PGCONFIG_PARAMETERS: $pg_ctl_bin -D $pgdata start -w -t 120"
+	"$pg_ctl_bin" -D "$pgdata" start -w -t 120
 	psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT 1" >/dev/null
 }
 
