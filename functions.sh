@@ -33,6 +33,21 @@ drop_os_page_cache()
 	return 0
 }
 
+# Used by 05_sql: drop OS page cache only before iteration 1 when DROP_CACHE_BEFORE_SQL=true.
+# Later SINGLE_USER_ITERATIONS keep the cache from the first pass.
+drop_os_page_cache_before_sql_iteration()
+{
+	local iter="${1:-1}"
+	if [ "${DROP_CACHE_BEFORE_SQL}" != "true" ]; then
+		return 0
+	fi
+	if [ "$iter" -gt 1 ]; then
+		echo "DROP_CACHE_BEFORE_SQL: SQL iteration $iter - keeping OS page cache (no drop after first iteration)"
+		return 0
+	fi
+	drop_os_page_cache
+}
+
 get_gpfdist_port()
 {
 	all_ports=$(psql -d postgres -t -A -c "select min(case when role = 'p' then port else 999999 end), min(case when role = 'm' then port else 999999 end) from gp_segment_configuration where content >= 0")

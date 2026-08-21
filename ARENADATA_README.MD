@@ -11,7 +11,7 @@ TPC_MODE="TPC-H"    # tpch/00_compile_tpch … tpch/09_score
 
 Shared knobs in `tpc_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, `COLLECT_OS_DATA`, …) apply to **both** modes. Entry point: `./tpc.sh`.
 
-TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score also reports DAT/TBL size, DB or external storage size, 05/07 query success rates, and (when `COLLECT_OS_DATA=true`) local OS CPU/RAM/network/disk averages for those steps.
+TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score reports 05_sql (`1 User Queries`, TPT, Score, success %) **per `SINGLE_USER_ITERATIONS` pass**, plus DAT/TBL size, DB or external storage size, 07 success rate, and (when `COLLECT_OS_DATA=true`) local OS CPU/RAM/network/disk averages for those steps.
 
 ---
 
@@ -207,8 +207,10 @@ Step logs go into subdirectories of `log/`:
 
 - DROP_CACHE_BEFORE_SQL="false"
 
-	``Default "false". When "true", immediately before step 05_sql runs:
+	``Default "false". When "true", immediately before the first 05_sql iteration:
 	`sync && echo 3 > /proc/sys/vm/drop_caches` (via passwordless sudo) to drop the OS page cache.
+	If SINGLE_USER_ITERATIONS>1, later iterations do not drop the cache (they reuse OS page cache
+	from the first pass). Score prints 1 User Queries / TPT / Score / 05_sql success % per iteration.
 	Applies to both TPC-DS and TPC-H. Does not drop cache before each individual query or before multi-user.``
 
 - RUN_SQL_WITH_DUCKDB="false"

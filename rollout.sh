@@ -301,10 +301,6 @@ while IFS= read -r i; do
 		echo "Skipping $i (corresponding RUN_*=false)"
 		continue
 	fi
-	# Optional OS page-cache drop immediately before single-user SQL step.
-	if [ "$(basename "$i")" = "05_sql" ] && [ "${DROP_CACHE_BEFORE_SQL}" = "true" ]; then
-		drop_os_page_cache || exit 1
-	fi
 	echo "$i/rollout.sh"
 	# Close stdin so step scripts (ssh, tools, etc.) cannot consume the step list
 	# from this while-read loop (classic bash pitfall).

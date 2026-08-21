@@ -15,6 +15,9 @@ SQL_ON_ERROR_STOP=${10}
 DELETE_DAT_FILES_BEFORE_SQL="${18}"
 RUN_SQL_FROM_ROLE="${19}"
 DROP_CACHE_BEFORE_SQL="${20}"
+if [ -z "$DROP_CACHE_BEFORE_SQL" ]; then
+	DROP_CACHE_BEFORE_SQL="false"
+fi
 DBNAME=${27}
 STATEMENT_TIMEOUT=${28}
 USE_EXTERNAL_FORMAT=${29}
@@ -61,6 +64,8 @@ init_log $step
 
 echo "SQL_ON_ERROR_STOP = $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT = $STATEMENT_TIMEOUT"
+echo "SINGLE_USER_ITERATIONS = $SINGLE_USER_ITERATIONS"
+echo "DROP_CACHE_BEFORE_SQL = $DROP_CACHE_BEFORE_SQL"
 echo "RUN_SQL_WITH_DUCKDB = $RUN_SQL_WITH_DUCKDB"
 echo "DUCKDB_MEMORY_LIMIT = $DUCKDB_MEMORY_LIMIT"
 echo "DUCKDB_THREADS = $DUCKDB_THREADS"
@@ -96,6 +101,7 @@ fi
 
 mkdir -p $PWD/../../log/single_explain_analyze_log
 rm -f $PWD/../../log/single_explain_analyze_log/*single.explain_analyze*.log
+sql_file_list=""
 for i in $(ls $PWD/*.tpcds.*.sql); do
 	qnum=`echo $i | awk -F '.' '{print $3}'`
 	if should_skip_tpcds_query "$qnum"; then
@@ -158,10 +164,17 @@ for i in $(ls $PWD/*.tpcds.*.sql); do
 		continue
 		fi
 	fi
-	for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
+	sql_file_list="$sql_file_list $i"
+done
+
+for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
+	echo "SQL iteration $x of $SINGLE_USER_ITERATIONS"
+	drop_os_page_cache_before_sql_iteration "$x" || exit 1
+	for i in $sql_file_list; do
 		id=`echo $i | awk -F '.' '{print $1}'`
 		schema_name=`echo $i | awk -F '.' '{print $2}'`
-		table_name=`echo $i | awk -F '.' '{print $3}'`
+		# description = schema.query.iteration so SCORE can split 05_sql passes
+		table_name="$(echo $i | awk -F '.' '{print $3}').${x}"
 		start_log
 		sql_outfile=$(mktemp)
 		sql_errfile=$(mktemp)
