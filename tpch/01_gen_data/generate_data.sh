@@ -16,11 +16,9 @@ if [[ "$GEN_DATA_SCALE" == "" || "$CHILD" == "" || "$PARALLEL" == "" || "$GEN_DA
         exit 1
 fi
 
-if [[ ! -d "$DATA_DIRECTORY" && ! -L "$DATA_DIRECTORY" ]]; then
-	mkdir $DATA_DIRECTORY
-fi
+mkdir -p "$DATA_DIRECTORY"
 
-rm -f $DATA_DIRECTORY/*.tbl*
+rm -f "$DATA_DIRECTORY"/*.tbl*
 
 export DSS_PATH=$DATA_DIRECTORY
 

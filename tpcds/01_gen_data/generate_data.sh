@@ -15,12 +15,10 @@ echo "CHILD: $CHILD"
 echo "PARALLEL: $PARALLEL"
 echo "GEN_DATA_PATH: $GEN_DATA_PATH"
 
-if [[ ! -d "$DATA_DIRECTORY" && ! -L "$DATA_DIRECTORY" ]]; then
-	echo "mkdir $DATA_DIRECTORY"
-	mkdir $DATA_DIRECTORY
-fi
+echo "mkdir -p $DATA_DIRECTORY"
+mkdir -p "$DATA_DIRECTORY"
 
-rm -f $DATA_DIRECTORY/*.dat
+rm -f "$DATA_DIRECTORY"/*.dat
 
 #for single nodes, you might only have a single segment but dsdgen requires at least 2
 if [ "$PARALLEL" -eq "1" ]; then

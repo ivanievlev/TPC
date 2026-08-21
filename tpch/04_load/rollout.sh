@@ -80,7 +80,7 @@ stop_gpfdist()
 {
 	echo "stop gpfdist on all ports"
 	for i in $(cat $PWD/../../segment_hosts.txt); do
-		ssh -n -f $i "bash -c 'cd ~/; ./stop_gpfdist.sh'"
+		ssh -n $SSH_BATCH_OPTS $i "bash -lc 'cd ~/; ./stop_gpfdist.sh'" || true
 	done
 }
 start_gpfdist()
@@ -95,7 +95,7 @@ start_gpfdist()
 			PORT=$(($GPFDIST_PORT + $CHILD))
 			echo `whoami`
 			echo "executing on $EXT_HOST ./start_gpfdist.sh $PORT $GEN_DATA_PATH"
-			ssh -n -f $EXT_HOST "bash -l -c 'cd ~/; ./start_gpfdist.sh $PORT $GEN_DATA_PATH'"
+			ssh -n $SSH_BATCH_OPTS $EXT_HOST "bash -lc 'cd ~/; ./start_gpfdist.sh $PORT $GEN_DATA_PATH'"
 			sleep 1
 		done
 	else
@@ -105,7 +105,7 @@ start_gpfdist()
 			GEN_DATA_PATH=$(gp_dat_dir "$(echo $i | awk -F '|' '{print $3}')")
 			PORT=$(($GPFDIST_PORT + $CHILD))
 			echo "executing on $EXT_HOST ./start_gpfdist.sh $PORT $GEN_DATA_PATH"
-			ssh -n -f $EXT_HOST "bash -c 'cd ~/; ./start_gpfdist.sh $PORT $GEN_DATA_PATH'"
+			ssh -n $SSH_BATCH_OPTS $EXT_HOST "bash -lc 'cd ~/; ./start_gpfdist.sh $PORT $GEN_DATA_PATH'"
 			sleep 1
 		done
 	fi
