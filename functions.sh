@@ -21,17 +21,15 @@ ADMIN_HOME=$(eval echo ~$ADMIN_USER)
 MASTER_HOST=$(hostname -s)
 
 # .dat / gpfdist subdirectory name (not a clone path).
-# EXTERNAL_FILE_DIRECTORY_PATH is only the root (default /tmp). .dat files:
+# EXTERNAL_FILE_DIRECTORY_PATH is only the root. .dat files:
 #   GP:  $EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/$DAT_FILE_SUBDIRECTORY_NAME
 #   PG:  $EXTERNAL_FILE_DIRECTORY_PATH/${DAT_FILE_SUBDIRECTORY_NAME}_<child>
 # Do not take these from positional $42/$43 here: functions.sh is also sourced
 # from the top-level rollout.sh, where those slots are other flags (e.g. false).
-: "${DAT_FILE_SUBDIRECTORY_NAME:=arenadata}"
-: "${EXTERNAL_FILE_DIRECTORY_PATH:=/tmp}"
 
 normalize_dat_file_subdirectory_name()
 {
-	local n="${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}"
+	local n="$DAT_FILE_SUBDIRECTORY_NAME"
 	n="${n#"${n%%[![:space:]]*}"}"
 	n="${n%"${n##*[![:space:]]}"}"
 	n="${n%/}"
@@ -41,17 +39,17 @@ normalize_dat_file_subdirectory_name()
 			n="${n#/}"
 		else
 			echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (got: ${DAT_FILE_SUBDIRECTORY_NAME})."
-			echo "Example: DAT_FILE_SUBDIRECTORY_NAME=\"arenadata\" → /tmp/primary/gpseg0/arenadata"
+			echo "Example: DAT_FILE_SUBDIRECTORY_NAME=\"datfiles\" → /tmp/primary/gpseg0/datfiles"
 			exit 1
 		fi
 	fi
 	if [ -z "$n" ] || [ "$n" = "." ] || [ "$n" = ".." ]; then
-		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (e.g. arenadata)."
+		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (e.g. datfiles)."
 		exit 1
 	fi
 	if [[ ! "$n" =~ ^[A-Za-z0-9._-]+$ ]]; then
 		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME contains invalid characters: $n"
-		echo "Use a name like arenadata (no slashes or spaces)."
+		echo "Use a name like datfiles (no slashes or spaces)."
 		exit 1
 	fi
 	DAT_FILE_SUBDIRECTORY_NAME="$n"
@@ -59,11 +57,10 @@ normalize_dat_file_subdirectory_name()
 
 normalize_external_file_directory_path()
 {
-	local p="${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}"
+	local p="$EXTERNAL_FILE_DIRECTORY_PATH"
 	p="${p#"${p%%[![:space:]]*}"}"
 	p="${p%"${p##*[![:space:]]}"}"
 	p="${p%/}"
-	[ -z "$p" ] && p="/tmp"
 	if [[ "$p" != /* ]]; then
 		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute directory (got: ${EXTERNAL_FILE_DIRECTORY_PATH:-empty})."
 		echo "Use the root only (e.g. /tmp). .dat files are written under"

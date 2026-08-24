@@ -27,7 +27,7 @@ external_ddl_dir()
 external_data_root()
 {
 	external_bench_defaults
-	echo "${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/${TPC_DATA_PREFIX}_${GEN_DATA_SCALE}_${USE_EXTERNAL_FORMAT}"
+	echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${TPC_DATA_PREFIX}_${GEN_DATA_SCALE}_${USE_EXTERNAL_FORMAT}"
 }
 
 # Remove leftover $EXTERNAL_FILE_DIRECTORY_PATH/{tpcds,tpch}_*_{parquet,csv,json} trees from previous runs.
@@ -35,7 +35,7 @@ purge_old_external_data()
 {
 	local d
 	local found=0
-	local root="${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}"
+	local root="${EXTERNAL_FILE_DIRECTORY_PATH}"
 	external_bench_defaults
 
 	if [ "${PURGE_OLD_EXTERNAL_DATA:-true}" != "true" ]; then
@@ -247,10 +247,10 @@ external_dat_glob()
 	external_bench_defaults
 	case "${TPC_MODE}" in
 		TPC-H)
-			echo "${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}_*/${table_name}.tbl*"
+			echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_*/${table_name}.tbl*"
 			;;
 		*)
-			echo "${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/${DAT_FILE_SUBDIRECTORY_NAME:-arenadata}_*/${table_name}_[0-9]*_[0-9]*.dat"
+			echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_*/${table_name}_[0-9]*_[0-9]*.dat"
 			;;
 	esac
 }

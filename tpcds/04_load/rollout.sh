@@ -32,7 +32,7 @@ echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
 # Free disk from previous parquet/csv/json runs (e.g. /tmp/tpcds_3_parquet).
 purge_old_external_data
 if { [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; } && [ -z "$GEN_DATA_SCALE" ]; then
-	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path ${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/tpcds_<scale>_${USE_EXTERNAL_FORMAT}/"
+	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path ${EXTERNAL_FILE_DIRECTORY_PATH}/tpcds_<scale>_${USE_EXTERNAL_FORMAT}/"
 	exit 1
 fi
 

@@ -54,7 +54,7 @@ score_multi_user_time_range()
 score_dat_bytes()
 {
 	local total=0 chunk hosts_file host
-	local root="${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}"
+	local root="${EXTERNAL_FILE_DIRECTORY_PATH}"
 
 	_sum_under() {
 		local dir="$1"

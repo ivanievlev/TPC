@@ -22,7 +22,7 @@ echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
 
 purge_old_external_data
 if { [ "$USE_EXTERNAL_FORMAT" = "parquet" ] || [ "$USE_EXTERNAL_FORMAT" = "csv" ] || [ "$USE_EXTERNAL_FORMAT" = "json" ]; } && [ -z "$GEN_DATA_SCALE" ]; then
-	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path ${EXTERNAL_FILE_DIRECTORY_PATH:-/tmp}/tpch_<scale>_${USE_EXTERNAL_FORMAT}/"
+	echo "ERROR: GEN_DATA_SCALE is empty; cannot build external path ${EXTERNAL_FILE_DIRECTORY_PATH}/tpch_<scale>_${USE_EXTERNAL_FORMAT}/"
 	exit 1
 fi
 

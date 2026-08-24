@@ -71,8 +71,8 @@ Step logs go into subdirectories of `log/`:
 - REPO="TPC-DS"
 - REPO_URL="https://github.com/ivanievlev/TPC-DS"
 - REPO_BRANCH="main"
-- ADMIN_USER="gpadmin"
-- DAT_FILE_SUBDIRECTORY_NAME="arenadata"
+- ADMIN_USER="postgres"
+- DAT_FILE_SUBDIRECTORY_NAME="datfiles"
 - EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
 - EXPLAIN_ANALYZE="false"
 - RANDOM_DISTRIBUTION="false"
@@ -97,20 +97,20 @@ Step logs go into subdirectories of `log/`:
 
 ## New Arenadata parameters
 
-- DAT_FILE_SUBDIRECTORY_NAME="arenadata"
+- DAT_FILE_SUBDIRECTORY_NAME="datfiles"
 
 	``Directory *name* (not a full path) under EXTERNAL_FILE_DIRECTORY_PATH for generated .dat files.
-	Default "arenadata". With EXTERNAL_FILE_DIRECTORY_PATH="/tmp" this yields:
-	gpfdist: /tmp/primary/gpseg0/arenadata (and /tmp/primary/gpsegN/arenadata on other primaries);
-	PostgreSQL: /tmp/arenadata_1, /tmp/arenadata_2, …
+	Default "datfiles". With EXTERNAL_FILE_DIRECTORY_PATH="/tmp" this yields:
+	gpfdist: /tmp/primary/gpseg0/datfiles (and /tmp/primary/gpsegN/datfiles on other primaries);
+	PostgreSQL: /tmp/datfiles_1, /tmp/datfiles_2, …
 	Former INSTALL_DIR="/arenadata" is migrated to this name automatically (basename of the old path).
 	The harness itself always runs in the git clone from which you started ./tpc.sh; log/ and segment_hosts.txt are created there.``
 
 - EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
 
 	``Absolute root for all generated data files (default "/tmp"). Combined with DAT_FILE_SUBDIRECTORY_NAME:
-	.dat for gpfdist: /tmp/primary/gpseg0/arenadata, /tmp/primary/gpseg1/arenadata, …;
-	.dat for PostgreSQL: /tmp/arenadata_1, /tmp/arenadata_2, …;
+	.dat for gpfdist: /tmp/primary/gpseg0/datfiles, /tmp/primary/gpseg1/datfiles, …;
+	.dat for PostgreSQL: /tmp/datfiles_1, /tmp/datfiles_2, …;
 	parquet/csv/json: /tmp/tpcds_<scale>_<format>/ (or tpch_…).
 	Must be an absolute path without '..'.``
 
@@ -147,13 +147,13 @@ Step logs go into subdirectories of `log/`:
 
 	``PostgreSQL statement_timeout for TPC-DS queries (single-user and multi-user). Examples: 1min, 30min, 1h. On timeout the query is cancelled; with SQL_ON_ERROR_STOP=true the SQL step stops.``
 
-- DBNAME="gp_tpcds"
+- DBNAME="pg_tpc"
 
-	``Default is gp_tpcds. Parameter was introduces to avoid conflicts of database "gpadmin" in case of concurrent TPC-H benchmark``
+	``Default is pg_tpc. Parameter was introduces to avoid conflicts of database "gpadmin" in case of concurrent TPC-H benchmark``
 
-- RUN_SQL_FROM_ROLE="gpadmin"
+- RUN_SQL_FROM_ROLE="postgres"
 
-	``We will run test from user that is set here. Default is gpadmin``
+	``We will run test from user that is set here. Default is postgres``
 
 - REFERENCE_TABLE_TYPE="aoco"
 

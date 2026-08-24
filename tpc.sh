@@ -62,12 +62,12 @@ check_variables()
 	fi
 	local count=$(grep "ADMIN_USER=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "ADMIN_USER=\"gpadmin\"" >> $MYVAR
+		echo "ADMIN_USER=\"postgres\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
         local count=$(grep "DBNAME=" $MYVAR | wc -l)
         if [ "$count" -eq "0" ]; then
-                echo "DBNAME=\"gp_tpcds\"" >> $MYVAR
+                echo "DBNAME=\"pg_tpc\"" >> $MYVAR
                 new_variable=$(($new_variable + 1))
         fi
 	# INSTALL_DIR used to be the clone parent (/arenadata). Runtime is now
@@ -86,7 +86,7 @@ check_variables()
 	fi
 	local count=$(grep "DAT_FILE_SUBDIRECTORY_NAME=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "DAT_FILE_SUBDIRECTORY_NAME=\"arenadata\"" >> $MYVAR
+		echo "DAT_FILE_SUBDIRECTORY_NAME=\"datfiles\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "EXTERNAL_FILE_DIRECTORY_PATH=" $MYVAR | wc -l)
@@ -178,7 +178,7 @@ check_variables()
 	fi
 	local count=$(grep "RUN_COMPILE_TPC" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "RUN_COMPILE_TPC=\"false\"" >> $MYVAR
+		echo "RUN_COMPILE_TPC=\"true\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	#01
@@ -286,7 +286,7 @@ check_variables()
 
         local count=$(grep "RUN_SQL_FROM_ROLE" $MYVAR | wc -l)
         if [ "$count" -eq "0" ]; then
-                echo "RUN_SQL_FROM_ROLE=\"gpadmin\"" >> $MYVAR
+                echo "RUN_SQL_FROM_ROLE=\"postgres\"" >> $MYVAR
                 new_variable=$(($new_variable + 1))
         fi
 
@@ -430,9 +430,6 @@ check_variables()
 	if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
 		SKIP_QUERIES_LIST=""
 	fi
-	if [ -z "${DAT_FILE_SUBDIRECTORY_NAME:-}" ]; then
-		DAT_FILE_SUBDIRECTORY_NAME="arenadata"
-	fi
 	_dat="$DAT_FILE_SUBDIRECTORY_NAME"
 	_dat="${_dat%/}"
 	if [[ "$_dat" == */* ]]; then
@@ -440,29 +437,25 @@ check_variables()
 			_dat="${_dat#/}"
 		else
 			echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (got: $DAT_FILE_SUBDIRECTORY_NAME)."
-			echo "Example: DAT_FILE_SUBDIRECTORY_NAME=\"arenadata\" → /tmp/primary/gpseg0/arenadata"
+			echo "Example: DAT_FILE_SUBDIRECTORY_NAME=\"datfiles\" → /tmp/primary/gpseg0/datfiles"
 			exit 1
 		fi
 	fi
 	DAT_FILE_SUBDIRECTORY_NAME="$_dat"
 	unset _dat
 	if [ -z "$DAT_FILE_SUBDIRECTORY_NAME" ] || [ "$DAT_FILE_SUBDIRECTORY_NAME" = "." ] || [ "$DAT_FILE_SUBDIRECTORY_NAME" = ".." ]; then
-		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (e.g. arenadata)."
+		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (e.g. datfiles)."
 		exit 1
 	fi
 	if [[ ! "$DAT_FILE_SUBDIRECTORY_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
 		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME contains invalid characters: $DAT_FILE_SUBDIRECTORY_NAME"
-		echo "Use a name like arenadata (no slashes or spaces)."
+		echo "Use a name like datfiles (no slashes or spaces)."
 		exit 1
-	fi
-	if [ -z "${EXTERNAL_FILE_DIRECTORY_PATH:-}" ]; then
-		EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
 	fi
 	_ext="$EXTERNAL_FILE_DIRECTORY_PATH"
 	_ext="${_ext#"${_ext%%[![:space:]]*}"}"
 	_ext="${_ext%"${_ext##*[![:space:]]}"}"
 	_ext="${_ext%/}"
-	[ -z "$_ext" ] && _ext="/tmp"
 	if [[ "$_ext" != /* ]]; then
 		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute directory (got: $EXTERNAL_FILE_DIRECTORY_PATH)."
 		echo "Use the root only (e.g. /tmp). .dat files are written under"
@@ -829,7 +822,7 @@ kill_previous_processes()
 	# Terminate leftover client backends in the current DB and common DS/H database names.
 	if command -v psql >/dev/null 2>&1 && [ -n "${ADMIN_USER:-}" ]; then
 		local dbs
-		dbs=$(printf '%s\n' "${DBNAME:-}" "pg_tpcds" "pg_tpch" "gp_tpcds" "gp_tpch" | awk 'NF && !seen[$0]++' | paste -sd, -)
+		dbs=$(printf '%s\n' "${DBNAME:-}" "pg_tpc" "pg_tpcds" "pg_tpch" "gp_tpcds" "gp_tpch" | awk 'NF && !seen[$0]++' | paste -sd, -)
 		echo "Terminating leftover client backends in databases: $dbs ..."
 		as_admin "psql -d postgres -v ON_ERROR_STOP=0 -q -c \"
 SELECT pg_terminate_backend(pid) AS terminated, datname, pid, left(query, 80) AS query
