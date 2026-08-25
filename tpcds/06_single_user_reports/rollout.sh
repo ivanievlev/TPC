@@ -32,6 +32,9 @@ for i in $(ls $PWD/*.copy.*.sql); do
 	logstep=$(echo $i | awk -F 'copy.' '{print $2}' | awk -F '.' '{print $1}')
 	logfile="$PWD/../../log/rollout_${logstep}.log"
 	ensure_rollout_log_for_copy "$logfile"
+	if [ "$logstep" = "sql" ]; then
+		pad_sql_log_backend_host "$logfile"
+	fi
 	logfile="'""$logfile""'"
 	echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -a -f $i -v LOGFILE=\"$logfile\""
 	psql -d $DBNAME -v ON_ERROR_STOP=1 -a -f $i -v LOGFILE="$logfile"

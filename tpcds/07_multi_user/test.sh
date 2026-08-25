@@ -194,12 +194,13 @@ for i in $(ls $sql_dir/*.sql); do
 	table_name=$(basename $i | awk -F '.' '{print $3}')
 	sql_outfile=$(mktemp)
 	sql_errfile=$(mktemp)
+	hostfile=$(mktemp)
 	psql_rc=0
 
 	if [ "$EXPLAIN_ANALYZE" == "false" ]; then
 		echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
 		set +e
-		psql -d $DBNAME -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i >"$sql_outfile" 2>"$sql_errfile"
+		psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" ""
 		psql_rc=$?
 		set -e
 		if [ -s "$sql_errfile" ]; then
@@ -215,7 +216,7 @@ for i in $(ls $sql_dir/*.sql); do
 		mylogfile=$PWD/../../log/multi_explain_analyze_log/"$session_id"".""$myfilename"".multi.explain_analyze.log"
 		echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i"
 		set +e
-		psql -d $DBNAME -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i >"$mylogfile" 2>"$sql_errfile"
+		psql_run_sql_capturing_host "$i" "$mylogfile" "$sql_errfile" "$hostfile" "EXPLAIN ANALYZE"
 		psql_rc=$?
 		set -e
 		if [ -s "$sql_errfile" ]; then
@@ -226,8 +227,8 @@ for i in $(ls $sql_dir/*.sql); do
 
 	QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
 	log $tuples
-	unset QUERY_STATUS
-	rm -f "$sql_outfile" "$sql_errfile"
+	unset QUERY_STATUS QUERY_BACKEND_HOST
+	rm -f "$sql_outfile" "$sql_errfile" "$hostfile"
 done
 
 end_step $step

@@ -182,11 +182,12 @@ for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
 		start_log
 		sql_outfile=$(mktemp)
 		sql_errfile=$(mktemp)
+		hostfile=$(mktemp)
 		psql_rc=0
 		if [ "$EXPLAIN_ANALYZE" == "false" ]; then
 			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
 			set +e
-			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="" -f $i >"$sql_outfile" 2>"$sql_errfile"
+			psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" ""
 			psql_rc=$?
 			set -e
 			# Keep stderr visible in the step log (same as before when psql wrote to the terminal).
@@ -199,7 +200,7 @@ for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
 			mylogfile=$PWD/../../log/single_explain_analyze_log/$myfilename.single.explain_analyze.log
 			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
 			set +e
-			psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c "$PSQL_SESSION_SETS" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE="EXPLAIN ANALYZE" -f $i >"$mylogfile" 2>"$sql_errfile"
+			psql_run_sql_capturing_host "$i" "$mylogfile" "$sql_errfile" "$hostfile" "EXPLAIN ANALYZE"
 			psql_rc=$?
 			set -e
 			if [ -s "$sql_errfile" ]; then
@@ -209,8 +210,8 @@ for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
 		fi
 		QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
 		log $tuples
-		unset QUERY_STATUS
-		rm -f "$sql_outfile" "$sql_errfile"
+		unset QUERY_STATUS QUERY_BACKEND_HOST
+		rm -f "$sql_outfile" "$sql_errfile" "$hostfile"
 	done
 done
 

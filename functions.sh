@@ -456,10 +456,12 @@ log()
 	# Prefer path from init_log; fall back to log/ for callers that set logfile only.
 	local out_file="${STEP_ROLLOUT_LOGFILE:-$LOCAL_PWD/log/$logfile}"
 
-	# Optional 6th field for SQL reports (see sql_query_status / QUERY_STATUS).
+	# Optional 6th/7th fields for SQL reports (query_status, backend_host).
 	if [ -n "${QUERY_STATUS:-}" ]; then
 		qs=$(printf '%s' "$QUERY_STATUS" | tr '|\n\r\t' '    ' | sed 's/  */ /g' | head -c 500)
-		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d|%s\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" "$qs" | tee -a "$out_file"
+		bh=$(printf '%s' "${QUERY_BACKEND_HOST:-unknown}" | tr '|\n\r\t' '    ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 200)
+		[ -z "$bh" ] && bh="unknown"
+		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d|%s|%s\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" "$qs" "$bh" | tee -a "$out_file"
 	else
 		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" | tee -a "$out_file"
 	fi
@@ -547,6 +549,87 @@ sql_query_status()
 	fi
 
 	echo "succesfull"
+}
+
+# Run a TPC query file in one psql session and record the backend hostname.
+# A second connection (HAProxy/PgBouncer round-robin) would hit another node,
+# so the probe must share the session with the workload. Hostname is read from
+# the server OS because PgBouncer often uses a unix socket (inet_server_addr
+# is then NULL). Must not CREATE TEMP TABLE: standbys are read-only.
+# DuckDB SET must come after the probe (PSQL_SESSION_SETS).
+#
+# $1 SQL file  $2 stdout  $3 stderr  $4 host file  $5 EXPLAIN_ANALYZE value
+# Uses: DBNAME, PSQL_SESSION_SETS, ON_ERROR_STOP, RUN_SQL_FROM_ROLE (optional).
+# Sets QUERY_BACKEND_HOST. Returns psql exit code.
+psql_run_sql_capturing_host()
+{
+	local sql_file=$1
+	local stdout_file=$2
+	local stderr_file=$3
+	local host_file=$4
+	local explain_val=$5
+	local wrapper rc
+	local role_opts=()
+
+	: > "$host_file"
+	wrapper=$(mktemp)
+	# Standbys reject CREATE TEMP TABLE. Session GUCs via set_config are allowed.
+	cat > "$wrapper" <<EOSQL
+DO \$\$
+DECLARE
+	h text;
+BEGIN
+	BEGIN
+		h := NULLIF(btrim(pg_catalog.pg_read_file('/etc/hostname', 0, 256), E'\n\r '), '');
+	EXCEPTION WHEN OTHERS THEN
+		h := NULL;
+	END;
+	IF h IS NULL OR h = '' THEN
+		BEGIN
+			h := NULLIF(btrim(pg_catalog.pg_read_file('/proc/sys/kernel/hostname', 0, 256), E'\n\r '), '');
+		EXCEPTION WHEN OTHERS THEN
+			h := NULL;
+		END;
+	END IF;
+	IF h IS NULL OR h = '' THEN
+		BEGIN
+			h := host(inet_server_addr());
+		EXCEPTION WHEN OTHERS THEN
+			h := NULL;
+		END;
+	END IF;
+	-- FQDN → short name (luka-adp-2.ru-central1.internal → luka-adp-2); keep IPs.
+	IF h IS NOT NULL AND h <> '' AND h !~ '^[0-9.]+$' AND position(':' in h) = 0 THEN
+		h := split_part(h, '.', 1);
+	END IF;
+	PERFORM set_config('tpc.backend_host', COALESCE(NULLIF(h, ''), 'unknown'), false);
+END
+\$\$;
+\\o $host_file
+SELECT current_setting('tpc.backend_host', true);
+\\o
+$PSQL_SESSION_SETS
+\\i $sql_file
+EOSQL
+
+	if [ -n "${RUN_SQL_FROM_ROLE:-}" ]; then
+		role_opts=(-U "$RUN_SQL_FROM_ROLE")
+	fi
+
+	psql -d "$DBNAME" "${role_opts[@]}" -v ON_ERROR_STOP="$ON_ERROR_STOP" -A -q -t -P pager=off -v EXPLAIN_ANALYZE="$explain_val" -f "$wrapper" >"$stdout_file" 2>"$stderr_file"
+	rc=$?
+	rm -f "$wrapper"
+
+	QUERY_BACKEND_HOST="unknown"
+	if [ -s "$host_file" ]; then
+		QUERY_BACKEND_HOST=$(tr -d '\r' < "$host_file" | head -n 1 | tr '|\t' '  ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+	fi
+	[ -z "$QUERY_BACKEND_HOST" ] && QUERY_BACKEND_HOST="unknown"
+	# FQDN → short name; do not chop IPv4/IPv6.
+	if [ "$QUERY_BACKEND_HOST" != "unknown" ] && [[ ! "$QUERY_BACKEND_HOST" =~ ^[0-9.]+$ ]] && [[ "$QUERY_BACKEND_HOST" != *:* ]]; then
+		QUERY_BACKEND_HOST="${QUERY_BACKEND_HOST%%.*}"
+	fi
+	return "$rc"
 }
 
 end_step()
@@ -874,6 +957,17 @@ ensure_rollout_log_for_copy()
 		echo "WARNING: $logfile not found (step may have been skipped); creating empty file for COPY"
 		: > "$logfile"
 	fi
+	chmod a+r "$logfile" 2>/dev/null || true
+}
+
+# SQL logs gained a 7th field (backend_host). Pad legacy 6-field lines so COPY still works.
+pad_sql_log_backend_host()
+{
+	local logfile="$1"
+	local tmp
+	[ -f "$logfile" ] && [ -s "$logfile" ] || return 0
+	tmp=$(mktemp)
+	awk -F'|' 'NF==6 { print $0 "|unknown"; next } { print }' "$logfile" > "$tmp" && mv "$tmp" "$logfile"
 	chmod a+r "$logfile" 2>/dev/null || true
 }
 

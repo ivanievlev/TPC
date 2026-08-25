@@ -15,11 +15,13 @@ SELECT query_id,
             WHEN query_status = 'cancelled due to timeout' THEN 1
             ELSE 2
           END,
-          timing DESC))[1] AS query_status
+          timing DESC))[1] AS query_status,
+       array_to_string(array_agg(DISTINCT backend_host), ', ') AS backend_hosts
 FROM (
 	SELECT split_part(description, '.', 2) AS query_id,
 	timing,
 	query_status,
+	backend_host,
 	CASE WHEN split_part(description, '.', 1) = '1' THEN extract('epoch' from duration) ELSE 0 END AS session_1,
 	CASE WHEN split_part(description, '.', 1) = '2' THEN extract('epoch' from duration) ELSE 0 END AS session_2,
 	CASE WHEN split_part(description, '.', 1) = '3' THEN extract('epoch' from duration) ELSE 0 END AS session_3,

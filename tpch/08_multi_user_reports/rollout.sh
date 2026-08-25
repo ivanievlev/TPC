@@ -29,6 +29,7 @@ done
 filename=$(ls $PWD/*.copy.*.sql)
 
 for i in $(ls $PWD/../../log/rollout_testing_log/rollout_testing_*.log 2> /dev/null); do
+	pad_sql_log_backend_host "$i"
 	logfile="'""$i""'"
 	
         echo "psql -d $DBNAME -v ON_ERROR_STOP=1 -a -f $filename -v LOGFILE=\"$logfile\""
