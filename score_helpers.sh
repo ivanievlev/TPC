@@ -47,7 +47,10 @@ score_multi_user_time_range()
 		if [ -z "$start_u" ] || [ "$s" -lt "$start_u" ]; then start_u=$s; fi
 		if [ -z "$end_u" ] || [ "$e" -gt "$end_u" ]; then end_u=$e; fi
 	done
-	[ -n "$start_u" ] && [ -n "$end_u" ] && echo "$start_u $end_u"
+	if [ -n "$start_u" ] && [ -n "$end_u" ]; then
+		echo "$start_u $end_u"
+	fi
+	return 0
 }
 
 # Bytes of generated flat files (.dat / .tbl*) under EXTERNAL_FILE_DIRECTORY_PATH (and remote hosts if listed).
@@ -516,6 +519,60 @@ score_os_metrics_for_window()
 	printf "%-36s %14s\n" "$label Disk used avg GB" "$(_fmt "$disk")"
 }
 
+# host|count|total|pct  — share of query executions on each backend host.
+score_queries_per_host()
+{
+	local schema="$1"
+	local table="${2:-sql}"
+	local has_col
+
+	has_col=$(psql -d "$DBNAME" -v ON_ERROR_STOP=0 -q -t -A -c "
+SELECT EXISTS (
+  SELECT 1 FROM information_schema.columns
+  WHERE table_schema = '${schema}'
+    AND table_name = '${table}'
+    AND column_name = 'backend_host'
+);
+" 2>/dev/null | tr -d '[:space:]')
+	if [ "$has_col" != "t" ] && [ "$has_col" != "true" ]; then
+		return 0
+	fi
+
+	psql -d "$DBNAME" -v ON_ERROR_STOP=0 -q -t -A -c "
+WITH tot AS (
+  SELECT count(*)::bigint AS n FROM ${schema}.${table}
+)
+SELECT coalesce(nullif(btrim(s.backend_host), ''), 'unknown') AS host,
+       count(*)::text,
+       t.n::text,
+       round(100.0 * count(*) / nullif(t.n, 0), 2)::text
+FROM ${schema}.${table} s
+CROSS JOIN tot t
+GROUP BY 1, t.n
+ORDER BY 1;
+" 2>/dev/null
+}
+
+print_score_queries_per_host()
+{
+	local title="$1"
+	local schema="$2"
+	local table="${3:-sql}"
+	local host n total pct
+	local any=0
+
+	echo ""
+	printf "%-36s %14s\n" "$title" ""
+	while IFS='|' read -r host n total pct; do
+		[ -z "$host" ] && continue
+		any=1
+		printf "%-22s %12s %10s%%\n" "$host" "$n/$total" "$pct"
+	done < <(score_queries_per_host "$schema" "$table")
+	if [ "$any" -eq 0 ]; then
+		printf "%-22s %12s %10s\n" "(none)" "-" "-"
+	fi
+}
+
 print_extended_score_metrics()
 {
 	local report_schema="$1"
@@ -545,6 +602,11 @@ print_extended_score_metrics()
 		printf "%-36s %14s\n" "05_sql success % (iter $iter)" "$pct05"
 	done < <(score_sql_iteration_success_pct "$report_schema")
 	printf "%-36s %14s\n" "07_multi_user success %" "$pct07"
+
+	print_score_queries_per_host "---- Statistics queries per host (05_sql) ----" "$report_schema" sql
+	if [ "${RUN_MULTI_USER_REPORT:-false}" = "true" ]; then
+		print_score_queries_per_host "---- Statistics queries per host (07_sql) ----" "$testing_schema" sql
+	fi
 
 	if [ "${COLLECT_OS_DATA:-true}" = "true" ]; then
 		echo ""

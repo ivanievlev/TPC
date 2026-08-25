@@ -18,11 +18,6 @@ if [ "$MULTI_USER_COUNT" -eq "0" ]; then
 	exit 0
 fi
 
-get_psql_count()
-{
-	psql_count=$(ps -ef | grep psql | grep multi_user | grep -v grep | wc -l)
-}
-
 get_file_count()
 {
 	file_count=$(ls $PWD/../../log/end_testing_log/end_testing*.log 2> /dev/null | wc -l)
@@ -59,22 +54,21 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 	done
 	cd "$local_dir"
 
+	session_pids=()
 	for x in $(seq 1 $MULTI_USER_COUNT); do
 		session_log=$local_dir/../../log/testing_session_log/testing_session_$x.log
 		echo "$local_dir/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
 		$local_dir/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST" |& tee $session_log &
+		session_pids+=($!)
 	done
 
-	sleep 60
-
-	get_psql_count
-	echo "Now executing queries. This make take a while."
-	echo -ne "Executing queries."
-	while [ "$psql_count" -gt "0" ]; do
-		echo -ne "."
-		sleep 60
-		get_psql_count
+	echo "Now executing queries. This may take a while."
+	echo "Waiting for ${#session_pids[@]} multi-user session(s)."
+	set +e
+	for pid in "${session_pids[@]}"; do
+		wait "$pid"
 	done
+	set -e
 	echo "queries complete"
 	echo ""
 
