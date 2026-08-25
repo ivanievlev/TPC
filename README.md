@@ -156,6 +156,12 @@ Step logs go into subdirectories of `log/`:
 	``TCP port of the Postgres or Greenplum coordinator to send load and queries to. Default 5432.
 	Used for every psql/analyzedb connection (libpq PGPORT). Example: PGPORT="5433" for a second instance.``
 
+- PGHOST=""
+
+	``Empty (default): libpq uses a Unix socket /tmp/.s.PGSQL.<PGPORT> — this is Postgres or PgBouncer, not HAProxy.
+	HAProxy listens on TCP only. To send load through HAProxy set both, e.g. PGHOST="127.0.0.1" and PGPORT="6432".
+	Use 127.0.0.1 (not localhost) so the client does not fall back to a Unix socket.``
+
 - RUN_SQL_FROM_ROLE="postgres"
 
 	``We will run test from user that is set here. Default is postgres``

@@ -15,12 +15,16 @@ run_priv()
 }
 
 # Run a bash -lc command as ADMIN_USER (replaces su -l / su -c).
-# Login shells source ~/.bashrc (which may set PGPORT); re-export PGPORT after that.
+# Login shells source ~/.bashrc (which may set PGPORT/PGHOST); re-export harness values after that.
 as_admin()
 {
 	local cmd="$1"
 	local port="${PGPORT:-5432}"
-	cmd="export PGPORT=\"${port}\"; ${cmd}"
+	local envcmd="export PGPORT=\"${port}\"; unset PGHOST;"
+	if [ -n "${PGHOST:-}" ]; then
+		envcmd="${envcmd} export PGHOST=\"${PGHOST}\";"
+	fi
+	cmd="${envcmd} ${cmd}"
 	if [ "$(id -un)" = "$ADMIN_USER" ]; then
 		bash -lc "$cmd"
 	else
@@ -86,6 +90,11 @@ check_variables()
 	local count=$(grep '^PGPORT=' $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
 		echo "PGPORT=\"5432\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep '^PGHOST=' $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo 'PGHOST="" # if empty then uses local connection via `unix_socket_directories`' >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	# INSTALL_DIR used to be the clone parent (/arenadata). Runtime is now
@@ -506,6 +515,13 @@ check_variables()
 	PGPORT="$_port"
 	unset _port
 	export PGPORT
+	PGHOST="${PGHOST#"${PGHOST%%[![:space:]]*}"}"
+	PGHOST="${PGHOST%"${PGHOST##*[![:space:]]}"}"
+	if [ -z "$PGHOST" ]; then
+		unset PGHOST
+	else
+		export PGHOST
+	fi
 	# Inline validation (tpc.sh does not source functions.sh — avoid clobbering ADMIN_USER).
 	_skip_list=$(echo "${SKIP_QUERIES_LIST}" | tr -d '[:space:]')
 	if [ -n "$_skip_list" ]; then
@@ -706,6 +722,7 @@ echo_variables()
 	echo "ADMIN_USER: $ADMIN_USER"
 	echo "DBNAME: $DBNAME"
 	echo "PGPORT: $PGPORT"
+	echo "PGHOST: ${PGHOST:-}"
 	echo "DAT_FILE_SUBDIRECTORY_NAME: $DAT_FILE_SUBDIRECTORY_NAME"
 	echo "EXTERNAL_FILE_DIRECTORY_PATH: $EXTERNAL_FILE_DIRECTORY_PATH"
 	echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
@@ -1014,7 +1031,7 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-as_admin "cd \"$PWD\"; PGPORT=\"${PGPORT:-5432}\" APPLY_PGCONFIG_PARAMETERS=\"${APPLY_PGCONFIG_PARAMETERS:-false}\" ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPC $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_SQL $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_OS_DATA \"$COLLECT_DATA_PERIOD\" \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\" \"$DAT_FILE_SUBDIRECTORY_NAME\" \"$EXTERNAL_FILE_DIRECTORY_PATH\""
+as_admin "cd \"$PWD\"; PGPORT=\"${PGPORT:-5432}\" PGHOST=\"${PGHOST:-}\" APPLY_PGCONFIG_PARAMETERS=\"${APPLY_PGCONFIG_PARAMETERS:-false}\" ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPC $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_SQL $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_OS_DATA \"$COLLECT_DATA_PERIOD\" \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\" \"$DAT_FILE_SUBDIRECTORY_NAME\" \"$EXTERNAL_FILE_DIRECTORY_PATH\""
 
 # Final marker for tpc.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).

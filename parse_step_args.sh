@@ -106,6 +106,11 @@ if type apply_tpc_pgport >/dev/null 2>&1; then
 else
 	PGPORT="${PGPORT:-5432}"
 	export PGPORT
+	if [ -z "${PGHOST:-}" ]; then
+		unset PGHOST
+	else
+		export PGHOST
+	fi
 fi
 if [ -z "$TRUNCATE_BEFORE_LOAD" ]; then
 	TRUNCATE_BEFORE_LOAD="true"

@@ -137,7 +137,8 @@ get_gpfdist_port()
 	done
 }
 
-# libpq/psql/analyzedb honor PGPORT. Value from tpc_variables.sh wins over ~/.bashrc.
+# libpq/psql/analyzedb honor PGPORT/PGHOST. Values from tpc_variables.sh win over ~/.bashrc.
+# Empty PGHOST → Unix socket (Postgres/PgBouncer). Set PGHOST=127.0.0.1 for HAProxy TCP.
 apply_tpc_pgport()
 {
 	local n
@@ -160,10 +161,22 @@ apply_tpc_pgport()
 	fi
 	PGPORT="$n"
 	export PGPORT
+
+	PGHOST="${PGHOST#"${PGHOST%%[![:space:]]*}"}"
+	PGHOST="${PGHOST%"${PGHOST##*[![:space:]]}"}"
+	if [ -z "$PGHOST" ]; then
+		unset PGHOST
+	else
+		export PGHOST
+	fi
 }
 
 source_bashrc()
 {
+	# Keep harness libpq target; admin profile may overwrite PGHOST/PGPORT.
+	local tpc_pghost="${PGHOST-}"
+	local tpc_pgport="${PGPORT-}"
+
 	if [ -f ~/.bashrc ]; then
 		# don't fail if an error is happening in the admin's profile
 		source ~/.bashrc || true
@@ -178,7 +191,9 @@ source_bashrc()
                 source ~/.profile || true
         fi
 
-	# After admin profile (may set PGPORT). Must run before get_version/psql.
+	PGHOST="$tpc_pghost"
+	PGPORT="$tpc_pgport"
+	# After admin profile. Must run before get_version/psql.
 	apply_tpc_pgport
 
 	count=$(grep -v "^#" ~/.bashrc  ~/.*profile | grep "greenplum_path" | wc -l)
@@ -1166,7 +1181,7 @@ log_postgres_test_parameters()
 		echo "############################################################################"
 		echo "PostgreSQL parameters for this test run"
 		echo "APPLY_PGCONFIG_PARAMETERS=${APPLY_PGCONFIG_PARAMETERS:-false}"
-		echo "PGPORT=${PGPORT:-5432}"
+		echo "PGPORT=${PGPORT:-5432} PGHOST=${PGHOST:-}"
 		echo "############################################################################"
 		if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.auto.conf" ]; then
 			cat "$pgdata/postgresql.auto.conf"
