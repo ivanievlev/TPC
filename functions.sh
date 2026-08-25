@@ -137,6 +137,31 @@ get_gpfdist_port()
 	done
 }
 
+# libpq/psql/analyzedb honor PGPORT. Value from tpc_variables.sh wins over ~/.bashrc.
+apply_tpc_pgport()
+{
+	local n
+	if [ -z "${PGPORT:-}" ] && [ -n "${PORT:-}" ]; then
+		PGPORT="$PORT"
+	fi
+	if [ -z "${PGPORT:-}" ]; then
+		PGPORT="5432"
+	fi
+	PGPORT="${PGPORT#"${PGPORT%%[![:space:]]*}"}"
+	PGPORT="${PGPORT%"${PGPORT##*[![:space:]]}"}"
+	if ! [[ "$PGPORT" =~ ^[0-9]+$ ]]; then
+		echo "ERROR: PGPORT must be an integer 1..65535 (got: ${PGPORT})."
+		exit 1
+	fi
+	n=$((10#$PGPORT))
+	if [ "$n" -lt 1 ] || [ "$n" -gt 65535 ]; then
+		echo "ERROR: PGPORT must be an integer 1..65535 (got: ${PGPORT})."
+		exit 1
+	fi
+	PGPORT="$n"
+	export PGPORT
+}
+
 source_bashrc()
 {
 	if [ -f ~/.bashrc ]; then
@@ -152,6 +177,9 @@ source_bashrc()
                 # don't fail if an error is happening in the admin's profile
                 source ~/.profile || true
         fi
+
+	# After admin profile (may set PGPORT). Must run before get_version/psql.
+	apply_tpc_pgport
 
 	count=$(grep -v "^#" ~/.bashrc  ~/.*profile | grep "greenplum_path" | wc -l)
 	if [ "$count" -eq "0" ]; then
@@ -223,6 +251,7 @@ should_skip_tpcds_query()
 get_version()
 {
 	#need to call source_bashrc first
+	apply_tpc_pgport
 	VERSION=$(psql -d postgres -v ON_ERROR_STOP=1 -t -A -c "SELECT CASE WHEN POSITION ('Greenplum Database 4.3' IN version) > 0 THEN 'gpdb_4_3' WHEN POSITION ('Greenplum Database 5' IN version) > 0 THEN 'gpdb_5' WHEN POSITION ('Greenplum Database 6' IN version) > 0 THEN 'gpdb_6' WHEN POSITION ('Greenplum Database 7' IN version) > 0 THEN 'gpdb_7' ELSE 'postgresql' END FROM version();") 
 	if [[ "$VERSION" == *"gpdb"* ]]; then
 		if [ "${HEAP_ONLY}" == "true" ]; then
@@ -1137,6 +1166,7 @@ log_postgres_test_parameters()
 		echo "############################################################################"
 		echo "PostgreSQL parameters for this test run"
 		echo "APPLY_PGCONFIG_PARAMETERS=${APPLY_PGCONFIG_PARAMETERS:-false}"
+		echo "PGPORT=${PGPORT:-5432}"
 		echo "############################################################################"
 		if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.auto.conf" ]; then
 			cat "$pgdata/postgresql.auto.conf"

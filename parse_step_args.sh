@@ -101,6 +101,12 @@ fi
 if [ -z "$USE_EXTERNAL_FORMAT" ]; then
 	USE_EXTERNAL_FORMAT="false"
 fi
+if type apply_tpc_pgport >/dev/null 2>&1; then
+	apply_tpc_pgport
+else
+	PGPORT="${PGPORT:-5432}"
+	export PGPORT
+fi
 if [ -z "$TRUNCATE_BEFORE_LOAD" ]; then
 	TRUNCATE_BEFORE_LOAD="true"
 fi

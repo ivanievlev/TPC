@@ -151,6 +151,11 @@ Step logs go into subdirectories of `log/`:
 
 	``Default is pg_tpc. Parameter was introduces to avoid conflicts of database "gpadmin" in case of concurrent TPC-H benchmark``
 
+- PGPORT="5432"
+
+	``TCP port of the Postgres or Greenplum coordinator to send load and queries to. Default 5432.
+	Used for every psql/analyzedb connection (libpq PGPORT). Example: PGPORT="5433" for a second instance.``
+
 - RUN_SQL_FROM_ROLE="postgres"
 
 	``We will run test from user that is set here. Default is postgres``

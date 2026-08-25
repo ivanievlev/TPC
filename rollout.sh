@@ -5,6 +5,7 @@ PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/functions.sh
 source $PWD/mode.sh
 source_bashrc
+apply_tpc_pgport
 
 GEN_DATA_SCALE="$1"
 EXPLAIN_ANALYZE="$2"
@@ -70,7 +71,7 @@ fi
 if [ -z "$COLLECT_DATA_PERIOD" ]; then
 	COLLECT_DATA_PERIOD="5s"
 fi
-export COLLECT_OS_DATA COLLECT_DATA_PERIOD APPLY_PGCONFIG_PARAMETERS
+export COLLECT_OS_DATA COLLECT_DATA_PERIOD APPLY_PGCONFIG_PARAMETERS PGPORT
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPC" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SQL" == "" || "$RUN_SINGLE_USER_REPORT" == "" || "$RUN_MULTI_USER" == "" || "$RUN_MULTI_USER_REPORT" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
 	echo "Please run this script from tpc.sh so the correct parameters are passed to it."
@@ -238,6 +239,7 @@ echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT: $STATEMENT_TIMEOUT"
 echo "ADMIN_USER: $ADMIN_USER"
 echo "DBNAME: $DBNAME"
+echo "PGPORT: $PGPORT"
 echo "DAT_FILE_SUBDIRECTORY_NAME: $DAT_FILE_SUBDIRECTORY_NAME"
 echo "EXTERNAL_FILE_DIRECTORY_PATH: $EXTERNAL_FILE_DIRECTORY_PATH"
 echo "USE_EXTERNAL_FORMAT: $USE_EXTERNAL_FORMAT"
