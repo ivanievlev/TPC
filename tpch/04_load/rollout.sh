@@ -219,7 +219,7 @@ if [[ "$VERSION" == *"gpdb"* ]]; then
 	fi
 
 	if [ "$PGPORT" == "" ]; then
-		export PGPORT=5432
+		export PGPORT="${PGPORT:-${PGPORT_WRITE:-5432}}"
 	fi
 fi
 

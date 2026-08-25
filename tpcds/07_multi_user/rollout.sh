@@ -59,6 +59,8 @@ fi
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../../functions.sh
 source_bashrc
+set_tpc_pgport_for_step "$PWD"
+apply_tpc_pgport
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
 get_psql_count()

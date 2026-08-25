@@ -41,6 +41,8 @@ else
 fi
 
 source_bashrc
+set_tpc_pgport_for_step "$PWD"
+apply_tpc_pgport
 
 step=testing_$session_id
 init_log $step

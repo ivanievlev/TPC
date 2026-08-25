@@ -4,6 +4,8 @@ set -e
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../../functions.sh
 source_bashrc
+set_tpc_pgport_for_step "$PWD"
+apply_tpc_pgport
 
 GEN_DATA_SCALE=$1
 EXPLAIN_ANALYZE=$2

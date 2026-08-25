@@ -71,7 +71,11 @@ fi
 if [ -z "$COLLECT_DATA_PERIOD" ]; then
 	COLLECT_DATA_PERIOD="5s"
 fi
-export COLLECT_OS_DATA COLLECT_DATA_PERIOD APPLY_PGCONFIG_PARAMETERS PGPORT
+export COLLECT_OS_DATA COLLECT_DATA_PERIOD APPLY_PGCONFIG_PARAMETERS PGPORT_WRITE PGPORT_SELECT
+if [ -z "${PGPORT:-}" ]; then
+	PGPORT="${PGPORT_WRITE:-5432}"
+fi
+export PGPORT
 if [ -n "${PGHOST:-}" ]; then
 	export PGHOST
 else
@@ -244,7 +248,8 @@ echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT: $STATEMENT_TIMEOUT"
 echo "ADMIN_USER: $ADMIN_USER"
 echo "DBNAME: $DBNAME"
-echo "PGPORT: $PGPORT"
+echo "PGPORT_WRITE: $PGPORT_WRITE"
+echo "PGPORT_SELECT: $PGPORT_SELECT"
 echo "PGHOST: ${PGHOST:-}"
 echo "DAT_FILE_SUBDIRECTORY_NAME: $DAT_FILE_SUBDIRECTORY_NAME"
 echo "EXTERNAL_FILE_DIRECTORY_PATH: $EXTERNAL_FILE_DIRECTORY_PATH"
@@ -318,6 +323,8 @@ while IFS= read -r i; do
 		continue
 	fi
 	echo "$i/rollout.sh"
+	set_tpc_pgport_for_step "$i"
+	echo "  PGPORT=$PGPORT (WRITE=$PGPORT_WRITE SELECT=$PGPORT_SELECT)"
 	# Close stdin so step scripts (ssh, tools, etc.) cannot consume the step list
 	# from this while-read loop (classic bash pitfall).
 	$i/rollout.sh $STEP_ARGS "$SKIP_QUERIES_LIST" "$DAT_FILE_SUBDIRECTORY_NAME" "$EXTERNAL_FILE_DIRECTORY_PATH" </dev/null

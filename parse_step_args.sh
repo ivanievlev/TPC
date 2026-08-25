@@ -102,9 +102,12 @@ if [ -z "$USE_EXTERNAL_FORMAT" ]; then
 	USE_EXTERNAL_FORMAT="false"
 fi
 if type apply_tpc_pgport >/dev/null 2>&1; then
+	if type set_tpc_pgport_for_step >/dev/null 2>&1; then
+		set_tpc_pgport_for_step "$PWD"
+	fi
 	apply_tpc_pgport
 else
-	PGPORT="${PGPORT:-5432}"
+	PGPORT="${PGPORT:-${PGPORT_WRITE:-5432}}"
 	export PGPORT
 	if [ -z "${PGHOST:-}" ]; then
 		unset PGHOST

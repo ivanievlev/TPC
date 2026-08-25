@@ -48,6 +48,8 @@ if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
 fi
 
 source_bashrc
+set_tpc_pgport_for_step "$PWD"
+apply_tpc_pgport
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
 step=testing_$session_id

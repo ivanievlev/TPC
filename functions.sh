@@ -137,30 +137,51 @@ get_gpfdist_port()
 	done
 }
 
-# libpq/psql/analyzedb honor PGPORT/PGHOST. Values from tpc_variables.sh win over ~/.bashrc.
-# Empty PGHOST → Unix socket (Postgres/PgBouncer). Set PGHOST=127.0.0.1 for HAProxy TCP.
+# Normalize one TCP port into the named variable (1..65535). Empty → 5432.
+_tpc_set_port_var()
+{
+	local name="$1"
+	local -n _portref="$1"
+	local v n
+	v="${_portref-}"
+	v="${v#"${v%%[![:space:]]*}"}"
+	v="${v%"${v##*[![:space:]]}"}"
+	if [ -z "$v" ]; then
+		v="5432"
+	fi
+	if ! [[ "$v" =~ ^[0-9]+$ ]]; then
+		echo "ERROR: $name must be an integer 1..65535 (got: ${v})." >&2
+		exit 1
+	fi
+	n=$((10#$v))
+	if [ "$n" -lt 1 ] || [ "$n" -gt 65535 ]; then
+		echo "ERROR: $name must be an integer 1..65535 (got: ${v})." >&2
+		exit 1
+	fi
+	_portref="$n"
+	export "$name"
+}
+
+# libpq uses PGPORT/PGHOST. PGPORT_WRITE vs PGPORT_SELECT come from tpc_variables.sh.
+# Empty PGHOST → Unix socket. Set PGHOST=127.0.0.1 for HAProxy TCP.
 apply_tpc_pgport()
 {
-	local n
-	if [ -z "${PGPORT:-}" ] && [ -n "${PORT:-}" ]; then
-		PGPORT="$PORT"
+	if [ -z "${PGPORT_WRITE:-}" ] && [ -z "${PGPORT_SELECT:-}" ]; then
+		if [ -n "${PGPORT:-}" ]; then
+			PGPORT_WRITE="$PGPORT"
+			PGPORT_SELECT="$PGPORT"
+		elif [ -n "${PORT:-}" ]; then
+			PGPORT_WRITE="$PORT"
+			PGPORT_SELECT="$PORT"
+		fi
 	fi
+	_tpc_set_port_var PGPORT_WRITE
+	_tpc_set_port_var PGPORT_SELECT
+
 	if [ -z "${PGPORT:-}" ]; then
-		PGPORT="5432"
+		PGPORT="$PGPORT_WRITE"
 	fi
-	PGPORT="${PGPORT#"${PGPORT%%[![:space:]]*}"}"
-	PGPORT="${PGPORT%"${PGPORT##*[![:space:]]}"}"
-	if ! [[ "$PGPORT" =~ ^[0-9]+$ ]]; then
-		echo "ERROR: PGPORT must be an integer 1..65535 (got: ${PGPORT})."
-		exit 1
-	fi
-	n=$((10#$PGPORT))
-	if [ "$n" -lt 1 ] || [ "$n" -gt 65535 ]; then
-		echo "ERROR: PGPORT must be an integer 1..65535 (got: ${PGPORT})."
-		exit 1
-	fi
-	PGPORT="$n"
-	export PGPORT
+	_tpc_set_port_var PGPORT
 
 	PGHOST="${PGHOST#"${PGHOST%%[![:space:]]*}"}"
 	PGHOST="${PGHOST%"${PGHOST##*[![:space:]]}"}"
@@ -171,11 +192,29 @@ apply_tpc_pgport()
 	fi
 }
 
+# Active libpq PGPORT: SELECT for 05_sql / 07_multi_user, WRITE for all other steps.
+set_tpc_pgport_for_step()
+{
+	local base
+	base=$(basename "$1")
+	case "$base" in
+		05_sql|07_multi_user)
+			PGPORT="${PGPORT_SELECT:-5432}"
+			;;
+		*)
+			PGPORT="${PGPORT_WRITE:-5432}"
+			;;
+	esac
+	export PGPORT
+}
+
 source_bashrc()
 {
-	# Keep harness libpq target; admin profile may overwrite PGHOST/PGPORT.
+	# Keep harness libpq target; admin profile may overwrite PGHOST/PGPORT*.
 	local tpc_pghost="${PGHOST-}"
 	local tpc_pgport="${PGPORT-}"
+	local tpc_pgport_write="${PGPORT_WRITE-}"
+	local tpc_pgport_select="${PGPORT_SELECT-}"
 
 	if [ -f ~/.bashrc ]; then
 		# don't fail if an error is happening in the admin's profile
@@ -192,6 +231,8 @@ source_bashrc()
         fi
 
 	PGHOST="$tpc_pghost"
+	PGPORT_WRITE="$tpc_pgport_write"
+	PGPORT_SELECT="$tpc_pgport_select"
 	PGPORT="$tpc_pgport"
 	# After admin profile. Must run before get_version/psql.
 	apply_tpc_pgport
@@ -1181,7 +1222,7 @@ log_postgres_test_parameters()
 		echo "############################################################################"
 		echo "PostgreSQL parameters for this test run"
 		echo "APPLY_PGCONFIG_PARAMETERS=${APPLY_PGCONFIG_PARAMETERS:-false}"
-		echo "PGPORT=${PGPORT:-5432} PGHOST=${PGHOST:-}"
+		echo "PGPORT_WRITE=${PGPORT_WRITE:-5432} PGPORT_SELECT=${PGPORT_SELECT:-5432} PGPORT=${PGPORT:-5432} PGHOST=${PGHOST:-}"
 		echo "############################################################################"
 		if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.auto.conf" ]; then
 			cat "$pgdata/postgresql.auto.conf"

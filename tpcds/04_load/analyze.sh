@@ -20,7 +20,7 @@ if [ "$return_status" -eq "0" ]; then
 	fi
 
 	if [ "$PGPORT" == "" ]; then
-		export PGPORT=5432
+		export PGPORT="${PGPORT:-${PGPORT_WRITE:-5432}}"
 	fi
 
 	start_log
