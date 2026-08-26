@@ -133,7 +133,7 @@ check_variables()
 	fi
 	local count=$(grep "EXPLAIN_ANALYZE=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "EXPLAIN_ANALYZE=\"false\"" >> $MYVAR
+		echo "EXPLAIN_ANALYZE=\"false\"  # affects only 05_sql (single-user) and ignored by 07_multi_user" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "RANDOM_DISTRIBUTION=" $MYVAR | wc -l)

@@ -74,12 +74,10 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 	mkdir -p \
 		$PWD/../../log/end_testing_log \
 		$PWD/../../log/rollout_testing_log \
-		$PWD/../../log/testing_session_log \
-		$PWD/../../log/multi_explain_analyze_log
+		$PWD/../../log/testing_session_log
 	rm -f $PWD/../../log/end_testing_log/end_testing_*.log
 	rm -f $PWD/../../log/testing_session_log/testing_session_*.log
 	rm -f $PWD/../../log/rollout_testing_log/rollout_testing_*.log
-	rm -f $PWD/../../log/multi_explain_analyze_log/*multi.explain_analyze*.log
 
 	rm -f $PWD/query_*.sql
 

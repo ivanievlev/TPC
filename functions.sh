@@ -357,7 +357,6 @@ ensure_log_dirs()
 		"$LOCAL_PWD/log/rollout_testing_log" \
 		"$LOCAL_PWD/log/testing_session_log" \
 		"$LOCAL_PWD/log/single_explain_analyze_log" \
-		"$LOCAL_PWD/log/multi_explain_analyze_log" \
 		"$LOCAL_PWD/log/archived_results"
 }
 

@@ -9,7 +9,7 @@ init_tpc_mode
 
 GEN_DATA_SCALE=$1
 session_id=$2
-EXPLAIN_ANALYZE=$3
+# $3 is leftover EXPLAIN_ANALYZE from the unified arg list; 07 never uses it.
 EXCLUDE_HEAVY_QUERIES=$4
 SQL_ON_ERROR_STOP=$5
 DBNAME=$6
@@ -21,8 +21,8 @@ DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${11}
 DUCKDB_THREADS_FOR_POSTGRES_SCAN=${12}
 SKIP_QUERIES_LIST=${13}
 
-if [[ "$session_id" == "" || "$EXPLAIN_ANALYZE" == "" ]]; then
-	echo "Error: you must provide the session id and explain analyze true/false as parameters."
+if [[ "$session_id" == "" ]]; then
+	echo "Error: you must provide the session id as a parameter."
 	exit 1
 fi
 if [ -z "$STATEMENT_TIMEOUT" ]; then
@@ -85,32 +85,17 @@ for i in $(ls $sql_dir/*.sql); do
 	hostfile=$(mktemp)
 	psql_rc=0
 
-	if [ "$EXPLAIN_ANALYZE" == "false" ]; then
-		echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
-		set +e
-		psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" ""
-		psql_rc=$?
-		set -e
-		if [ -s "$sql_errfile" ]; then
-			cat "$sql_errfile" >&2
-		fi
-		tuples=$(wc -l < "$sql_outfile" | tr -d ' ')
-		if [ "$tuples" -gt 0 ]; then
-			tuples=$((tuples - 1))
-		fi
-	else
-		myfilename=$(basename $i)
-		mylogfile=$PWD/../../log/multi_explain_analyze_log/"$session_id"".""$myfilename"".multi.explain_analyze.log"
-		mkdir -p "$(dirname "$mylogfile")"
-		echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i"
-		set +e
-		psql_run_sql_capturing_host "$i" "$mylogfile" "$sql_errfile" "$hostfile" "EXPLAIN ANALYZE"
-		psql_rc=$?
-		set -e
-		if [ -s "$sql_errfile" ]; then
-			cat "$sql_errfile" >&2
-		fi
-		tuples=$(tuples_from_explain_log "$mylogfile")
+	echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
+	set +e
+	psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" ""
+	psql_rc=$?
+	set -e
+	if [ -s "$sql_errfile" ]; then
+		cat "$sql_errfile" >&2
+	fi
+	tuples=$(wc -l < "$sql_outfile" | tr -d ' ')
+	if [ "$tuples" -gt 0 ]; then
+		tuples=$((tuples - 1))
 	fi
 
 	QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
