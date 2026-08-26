@@ -129,7 +129,7 @@ for i in $(ls $sql_dir/*.sql); do
 	id=$i
         qnum=`echo $i | awk -F '.' '{print $3}'`
 	if should_skip_tpcds_query "$qnum"; then
-		echo "Skipping $qnum due to SKIP_QUERIES_LIST=${SKIP_QUERIES_LIST}."
+		echo "Skipping $qnum due to $(_tpc_skip_list_var_name)=${SKIP_QUERIES_LIST}."
 		continue
 	fi
         if [ "$EXCLUDE_HEAVY_QUERIES" == "true" ]; then

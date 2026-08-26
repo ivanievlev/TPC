@@ -6,18 +6,6 @@ source $PWD/../../functions.sh
 source_bashrc
 source $PWD/../../parse_step_args.sh
 require_admin_access_to_clone
-net_core_rmem=${11}
-net_core_wmem=${12}
-rg6_memory_limit=${13}
-rg6_memory_shared_quota=${14}
-rg6_concurrency=${15}
-rg6_cpu_rate_limit=${16}
-rg7_cpu_hard_quota_limit=${17}
-RUN_SQL_FROM_ROLE=${19}
-ADMIN_USER=${22}
-SET_OPTIMIZER=${25}
-DBNAME=${27}
-
 echo "DBNAME=$DBNAME"
 IS_DB_EXIST=$(psql -d postgres -v ON_ERROR_STOP=1 -q -A -t -c "select count(*) from pg_database where datname = '$DBNAME'")
 echo "IS_DB_EXIST = $IS_DB_EXIST"

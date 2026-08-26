@@ -44,7 +44,7 @@ sql_file_list=""
 for i in $(ls $PWD/*.tpch.*.sql); do
 	qnum=$(echo "$i" | awk -F '.' '{print $3}')
 	if should_skip_tpcds_query "$qnum"; then
-		echo "Skipping $qnum due to SKIP_QUERIES_LIST=${SKIP_QUERIES_LIST}."
+		echo "Skipping $qnum due to $(_tpc_skip_list_var_name)=${SKIP_QUERIES_LIST}."
 		continue
 	fi
 	sql_file_list="$sql_file_list $i"

@@ -50,14 +50,43 @@ check_variables()
 		touch $PWD/$MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
-	local count=$(grep "REPO=" $MYVAR | wc -l)
-	if [ "$count" -eq "0" ]; then
-		echo "REPO=\"TPC\"" >> $MYVAR
+
+	# Retired / renamed knobs from older tpc_variables.sh files.
+	if grep -q '^REPO=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^REPO=/d' "$MYVAR"
 		new_variable=$(($new_variable + 1))
 	fi
-	local count=$(grep "REPO_URL=" $MYVAR | wc -l)
-	if [ "$count" -eq "0" ]; then
-		echo "REPO_URL=\"https://github.com/ivanievlev/TPC\"" >> $MYVAR
+	if grep -q '^REPO_URL=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^REPO_URL=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
+	if grep -q '^RUN_SINGLE_USER_REPORT=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^RUN_SINGLE_USER_REPORT=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
+	if grep -q '^RUN_MULTI_USER_REPORT=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^RUN_MULTI_USER_REPORT=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
+	if grep -q '^RUN_SQL=' "$MYVAR" 2>/dev/null; then
+		if ! grep -q '^RUN_SINGLE_USER=' "$MYVAR" 2>/dev/null; then
+			echo "Renaming RUN_SQL -> RUN_SINGLE_USER in $MYVAR"
+			sed -i 's/^RUN_SQL=/RUN_SINGLE_USER=/' "$MYVAR"
+		else
+			sed -i '/^RUN_SQL=/d' "$MYVAR"
+		fi
+		new_variable=$(($new_variable + 1))
+	fi
+	if grep -q '^SKIP_QUERIES_LIST=' "$MYVAR" 2>/dev/null; then
+		_old_skip=$(grep '^SKIP_QUERIES_LIST=' "$MYVAR" | tail -1 | sed 's/^SKIP_QUERIES_LIST=//')
+		if ! grep -q '^SKIP_TPCDS_QUERIES_LIST=' "$MYVAR" 2>/dev/null; then
+			echo "SKIP_TPCDS_QUERIES_LIST=${_old_skip}" >> "$MYVAR"
+		fi
+		if ! grep -q '^SKIP_TPCH_QUERIES_LIST=' "$MYVAR" 2>/dev/null; then
+			echo "SKIP_TPCH_QUERIES_LIST=${_old_skip}" >> "$MYVAR"
+		fi
+		sed -i '/^SKIP_QUERIES_LIST=/d' "$MYVAR"
+		unset _old_skip
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "REPO_BRANCH=" $MYVAR | wc -l)
@@ -161,14 +190,19 @@ check_variables()
                 echo "PARTITION_EVERY_FACTOR=\"1\"" >> $MYVAR
                 new_variable=$(($new_variable + 1))
         fi
-        local count=$(grep "EXCLUDE_HEAVY_QUERIES" $MYVAR | wc -l)
+        local count=$(grep '^EXCLUDE_HEAVY_QUERIES=' $MYVAR | wc -l)
         if [ "$count" -eq "0" ]; then
                 echo "EXCLUDE_HEAVY_QUERIES=\"false\"" >> $MYVAR
                 new_variable=$(($new_variable + 1))
         fi
-	local count=$(grep "SKIP_QUERIES_LIST" $MYVAR | wc -l)
+	local count=$(grep '^SKIP_TPCDS_QUERIES_LIST=' $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "SKIP_QUERIES_LIST=\"\"" >> $MYVAR
+		echo "SKIP_TPCDS_QUERIES_LIST=\"\"" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep '^SKIP_TPCH_QUERIES_LIST=' $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "SKIP_TPCH_QUERIES_LIST=\"\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	# Migrate legacy EXTRA_TPCDS_SCHEMAS → EMPTY_SCHEMAS_CNT
@@ -243,31 +277,19 @@ check_variables()
 		new_variable=$(($new_variable + 1))
 	fi
 	#05
-	local count=$(grep "RUN_SQL" $MYVAR | wc -l)
+	local count=$(grep '^RUN_SINGLE_USER=' $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "RUN_SQL=\"true\"" >> $MYVAR
-		new_variable=$(($new_variable + 1))
-	fi
-	#06
-	local count=$(grep "RUN_SINGLE_USER_REPORT" $MYVAR | wc -l)
-	if [ "$count" -eq "0" ]; then
-		echo "RUN_SINGLE_USER_REPORT=\"true\"" >> $MYVAR
+		echo "RUN_SINGLE_USER=\"true\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	#07
-	local count=$(grep "RUN_MULTI_USER" $MYVAR | wc -l)
+	local count=$(grep '^RUN_MULTI_USER=' $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
 		echo "RUN_MULTI_USER=\"true\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
-	#08
-	local count=$(grep "RUN_MULTI_USER_REPORT" $MYVAR | wc -l)
-	if [ "$count" -eq "0" ]; then
-		echo "RUN_MULTI_USER_REPORT=\"true\"" >> $MYVAR
-		new_variable=$(($new_variable + 1))
-	fi
 	#09
-	local count=$(grep "RUN_SCORE" $MYVAR | wc -l)
+	local count=$(grep '^RUN_SCORE=' $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
 		echo "RUN_SCORE=\"true\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
@@ -456,16 +478,15 @@ check_variables()
 	echo "Sourcing $MYVAR"
 	echo "############################################################################"
 	echo ""
-	# Migrate legacy clone identity from the old TPC-DS repository name.
-	if grep -q '^REPO="TPC-DS"' "$MYVAR" 2>/dev/null; then
-		sed -i 's/^REPO="TPC-DS"/REPO="TPC"/' "$MYVAR"
-	fi
-	if grep -q '^REPO_URL="https://github.com/ivanievlev/TPC-DS"' "$MYVAR" 2>/dev/null; then
-		sed -i 's|^REPO_URL="https://github.com/ivanievlev/TPC-DS"|REPO_URL="https://github.com/ivanievlev/TPC"|' "$MYVAR"
-	fi
 	source $MYVAR
-	if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
-		SKIP_QUERIES_LIST=""
+	REPO="TPC"
+	REPO_URL=$(git -C "$PWD" remote get-url origin 2>/dev/null || true)
+	REPO_URL="${REPO_URL:-}"
+	if [ -z "${SKIP_TPCDS_QUERIES_LIST+x}" ]; then
+		SKIP_TPCDS_QUERIES_LIST=""
+	fi
+	if [ -z "${SKIP_TPCH_QUERIES_LIST+x}" ]; then
+		SKIP_TPCH_QUERIES_LIST=""
 	fi
 	_dat="$DAT_FILE_SUBDIRECTORY_NAME"
 	_dat="${_dat%/}"
@@ -545,30 +566,33 @@ check_variables()
 	else
 		export PGHOST
 	fi
-	# Inline validation (tpc.sh does not source functions.sh — avoid clobbering ADMIN_USER).
-	_skip_list=$(echo "${SKIP_QUERIES_LIST}" | tr -d '[:space:]')
-	if [ -n "$_skip_list" ]; then
-		IFS=',' read -ra _skip_items <<< "$_skip_list"
-		for _item in "${_skip_items[@]}"; do
-			if [ -z "$_item" ]; then
-				echo "ERROR: SKIP_QUERIES_LIST has an empty entry (got: ${SKIP_QUERIES_LIST})"
-				echo "Expected comma-separated query numbers in 1..99, e.g. \"85\" or \"1,64,85\"."
+	# Inline skip-list validation (tpc.sh does not source functions.sh — avoid clobbering ADMIN_USER).
+	_tpc_validate_skip_list()
+	{
+		local list="$1" max="$2" vname="$3" item n
+		list=$(echo "$list" | tr -d '[:space:]')
+		[ -z "$list" ] && return 0
+		IFS=',' read -ra _skip_items <<< "$list"
+		for item in "${_skip_items[@]}"; do
+			if [ -z "$item" ]; then
+				echo "ERROR: ${vname} has an empty entry (got: ${1})"
+				echo "Expected comma-separated query numbers in 1..${max}."
 				exit 1
 			fi
-			if ! [[ "$_item" =~ ^[0-9]+$ ]]; then
-				echo "ERROR: SKIP_QUERIES_LIST invalid entry \"$_item\" (must be an integer 1..99)."
-				echo "Example: SKIP_QUERIES_LIST=\"85\" or SKIP_QUERIES_LIST=\"1,64,85\"."
+			if ! [[ "$item" =~ ^[0-9]+$ ]]; then
+				echo "ERROR: ${vname} invalid entry \"$item\" (must be an integer 1..${max})."
 				exit 1
 			fi
-			_n=$((10#$_item))
-			if [ "$_n" -lt 1 ] || [ "$_n" -gt 99 ]; then
-				echo "ERROR: SKIP_QUERIES_LIST query $_n is out of range (must be 1..99)."
-				echo "Example: SKIP_QUERIES_LIST=\"85\" or SKIP_QUERIES_LIST=\"1,64,85\"."
+			n=$((10#$item))
+			if [ "$n" -lt 1 ] || [ "$n" -gt "$max" ]; then
+				echo "ERROR: ${vname} query $n is out of range (must be 1..${max})."
 				exit 1
 			fi
 		done
-	fi
-	unset _skip_list _skip_items _item _n
+	}
+	_tpc_validate_skip_list "$SKIP_TPCDS_QUERIES_LIST" 99 "SKIP_TPCDS_QUERIES_LIST"
+	_tpc_validate_skip_list "$SKIP_TPCH_QUERIES_LIST" 22 "SKIP_TPCH_QUERIES_LIST"
+	unset _skip_items
 }
 
 check_user()
@@ -742,6 +766,17 @@ echo_variables()
 	echo "REPO: $REPO"
 	echo "REPO_URL: $REPO_URL"
 	echo "REPO_BRANCH: $REPO_BRANCH"
+	echo "TPC_MODE: $TPC_MODE"
+	echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
+	echo "EXPLAIN_ANALYZE: $EXPLAIN_ANALYZE"
+	echo "RUN_COMPILE_TPC: $RUN_COMPILE_TPC"
+	echo "RUN_GEN_DATA: $RUN_GEN_DATA"
+	echo "RUN_INIT: $RUN_INIT"
+	echo "RUN_DDL: $RUN_DDL"
+	echo "RUN_LOAD: $RUN_LOAD"
+	echo "RUN_SINGLE_USER: $RUN_SINGLE_USER"
+	echo "RUN_MULTI_USER: $RUN_MULTI_USER"
+	echo "RUN_SCORE: $RUN_SCORE"
 	echo "ADMIN_USER: $ADMIN_USER"
 	echo "DBNAME: $DBNAME"
 	echo "PGPORT_WRITE: $PGPORT_WRITE"
@@ -752,7 +787,8 @@ echo_variables()
 	echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
 	echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"
 	echo "EXCLUDE_HEAVY_QUERIES: $EXCLUDE_HEAVY_QUERIES"
-	echo "SKIP_QUERIES_LIST: $SKIP_QUERIES_LIST"
+	echo "SKIP_TPCDS_QUERIES_LIST: $SKIP_TPCDS_QUERIES_LIST"
+	echo "SKIP_TPCH_QUERIES_LIST: $SKIP_TPCH_QUERIES_LIST"
         echo "EMPTY_SCHEMAS_CNT: $EMPTY_SCHEMAS_CNT"
 	echo "TRUNCATE_BEFORE_LOAD: $TRUNCATE_BEFORE_LOAD"
 	echo "SQL_ON_ERROR_STOP: $SQL_ON_ERROR_STOP"
@@ -1055,7 +1091,7 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-as_admin "cd \"$PWD\"; PGPORT_WRITE=\"${PGPORT_WRITE:-5432}\" PGPORT_SELECT=\"${PGPORT_SELECT:-5432}\" PGPORT=\"${PGPORT_WRITE:-5432}\" PGHOST=\"${PGHOST:-}\" APPLY_PGCONFIG_PARAMETERS=\"${APPLY_PGCONFIG_PARAMETERS:-false}\" ./rollout.sh $GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $RUN_COMPILE_TPC $RUN_GEN_DATA $RUN_INIT $RUN_DDL $RUN_LOAD $RUN_SQL $RUN_SINGLE_USER_REPORT $RUN_MULTI_USER $RUN_MULTI_USER_REPORT $RUN_SCORE $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $REFERENCE_TABLE_TYPE $DROP_CACHE_BEFORE_SQL $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_OS_DATA \"$COLLECT_DATA_PERIOD\" \"$SKIP_QUERIES_LIST\" \"$TPC_MODE\" \"$DAT_FILE_SUBDIRECTORY_NAME\" \"$EXTERNAL_FILE_DIRECTORY_PATH\""
+as_admin "cd \"$PWD\"; PGPORT_WRITE=\"${PGPORT_WRITE:-5432}\" PGPORT_SELECT=\"${PGPORT_SELECT:-5432}\" PGPORT=\"${PGPORT_WRITE:-5432}\" PGHOST=\"${PGHOST:-}\" ./rollout.sh"
 
 # Final marker for tpc.log / tail -f (printed only after rollout returns successfully;
 # independent of which RUN_* steps were enabled).

@@ -253,10 +253,10 @@ where tuples = 0
   and split_part(description, '.', 2) not like '%\_pkey' escape chr(92)
   and split_part(description, '.', 2) not like 'constraint\_%' escape chr(92)")")
 
-	if [ "${RUN_MULTI_USER_REPORT:-false}" = "true" ]; then
+	if [ "${RUN_MULTI_USER:-false}" = "true" ]; then
 		concurrent_queries_time=$(_score_trim_num "$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from ${TPC_TESTING_SCHEMA}.sql")")
 	else
-		echo "Skipping multi-user time (RUN_MULTI_USER_REPORT=${RUN_MULTI_USER_REPORT:-false})"
+		echo "Skipping multi-user time (RUN_MULTI_USER=${RUN_MULTI_USER:-false})"
 		concurrent_queries_time=0
 	fi
 
@@ -280,7 +280,7 @@ where tuples = 0
 		printf "%-36s %14.3f\n" "1 User Queries (iter $iter)" "$qtime"
 	done <<< "$sql_iters"
 
-	if [ "${RUN_MULTI_USER_REPORT:-false}" = "true" ]; then
+	if [ "${RUN_MULTI_USER:-false}" = "true" ]; then
 		printf "%-36s %14.3f\n" "${MULTI_USER_COUNT} User Queries" "$concurrent_queries_time"
 	else
 		printf "%-36s %14s\n" "${MULTI_USER_COUNT} User Queries" "skipped"
@@ -294,7 +294,7 @@ where tuples = 0
 		printf "%-36s %14.3f\n" "TPT (iter $iter)" "$tpt"
 	done <<< "$sql_iters"
 
-	if [ "${RUN_MULTI_USER_REPORT:-false}" = "true" ]; then
+	if [ "${RUN_MULTI_USER:-false}" = "true" ]; then
 		printf "%-36s %14.3f\n" "TTT" "$concurrent_queries_time"
 	else
 		printf "%-36s %14s\n" "TTT" "skipped"
@@ -604,7 +604,7 @@ print_extended_score_metrics()
 	printf "%-36s %14s\n" "07_multi_user success %" "$pct07"
 
 	print_score_queries_per_host "---- Statistics queries per host (05_sql) ----" "$report_schema" sql
-	if [ "${RUN_MULTI_USER_REPORT:-false}" = "true" ]; then
+	if [ "${RUN_MULTI_USER:-false}" = "true" ]; then
 		print_score_queries_per_host "---- Statistics queries per host (07_sql) ----" "$testing_schema" sql
 	fi
 

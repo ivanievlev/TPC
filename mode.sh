@@ -45,6 +45,16 @@ init_tpc_mode()
 
 	export TPC_MODE TPC_BENCH_LABEL TPC_SCHEMA TPC_REPORT_SCHEMA TPC_TESTING_SCHEMA
 	export TPC_QUERY_ID_MAX TPC_COMPILE_STEP_NAME TPC_ENTRY_SCRIPT TPC_LOG_PREFIX TPC_DATA_PREFIX TPC_STEP_ROOT
+
+	if type resolve_tpc_skip_queries_list >/dev/null 2>&1; then
+		resolve_tpc_skip_queries_list
+	else
+		case "$TPC_MODE" in
+			TPC-H) SKIP_QUERIES_LIST="${SKIP_TPCH_QUERIES_LIST:-}" ;;
+			*) SKIP_QUERIES_LIST="${SKIP_TPCDS_QUERIES_LIST:-}" ;;
+		esac
+		export SKIP_QUERIES_LIST
+	fi
 }
 
 # Print space-separated absolute step directories for the current mode (ordered).

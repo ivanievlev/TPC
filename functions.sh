@@ -248,13 +248,32 @@ source_bashrc()
 	fi
 }
 
-# Validate SKIP_QUERIES_LIST: empty or comma-separated integers in 1..TPC_QUERY_ID_MAX
-# (99 for TPC-DS, 22 for TPC-H). Examples OK: "", "85", "1,64,85".
+# Active skip list for the current TPC_MODE (internal alias used by 05/07).
+resolve_tpc_skip_queries_list()
+{
+	case "${TPC_MODE:-TPC-DS}" in
+		TPC-H) SKIP_QUERIES_LIST="${SKIP_TPCH_QUERIES_LIST:-}" ;;
+		*) SKIP_QUERIES_LIST="${SKIP_TPCDS_QUERIES_LIST:-}" ;;
+	esac
+	export SKIP_QUERIES_LIST
+}
+
+_tpc_skip_list_var_name()
+{
+	case "${TPC_MODE:-TPC-DS}" in
+		TPC-H) echo "SKIP_TPCH_QUERIES_LIST" ;;
+		*) echo "SKIP_TPCDS_QUERIES_LIST" ;;
+	esac
+}
+
+# Validate the active skip list: empty or comma-separated integers in 1..TPC_QUERY_ID_MAX.
 validate_skip_queries_list()
 {
 	local list="${1:-}"
 	local item n
 	local max="${TPC_QUERY_ID_MAX:-99}"
+	local vname
+	vname=$(_tpc_skip_list_var_name)
 	list=$(echo "$list" | tr -d '[:space:]')
 	if [ -z "$list" ]; then
 		return 0
@@ -262,24 +281,24 @@ validate_skip_queries_list()
 	IFS=',' read -ra _skip_items <<< "$list"
 	for item in "${_skip_items[@]}"; do
 		if [ -z "$item" ]; then
-			echo "ERROR: SKIP_QUERIES_LIST has an empty entry (got: ${1})"
+			echo "ERROR: ${vname} has an empty entry (got: ${1})"
 			echo "Expected comma-separated query numbers in 1..${max}."
 			exit 1
 		fi
 		if ! [[ "$item" =~ ^[0-9]+$ ]]; then
-			echo "ERROR: SKIP_QUERIES_LIST invalid entry \"$item\" (must be an integer 1..${max})."
+			echo "ERROR: ${vname} invalid entry \"$item\" (must be an integer 1..${max})."
 			exit 1
 		fi
 		# Force decimal (avoid octal for 08/09); strip leading zeros.
 		n=$((10#$item))
 		if [ "$n" -lt 1 ] || [ "$n" -gt "$max" ]; then
-			echo "ERROR: SKIP_QUERIES_LIST query $n is out of range (must be 1..${max} for ${TPC_MODE:-TPC-DS})."
+			echo "ERROR: ${vname} query $n is out of range (must be 1..${max} for ${TPC_MODE:-TPC-DS})."
 			exit 1
 		fi
 	done
 }
 
-# Return 0 if TPC-DS query number $1 is listed in SKIP_QUERIES_LIST ($2 optional override).
+# Return 0 if query number $1 is listed in the active skip list ($2 optional override).
 # $1 may be zero-padded (e.g. "01", "85").
 should_skip_tpcds_query()
 {

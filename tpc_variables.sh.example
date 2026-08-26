@@ -1,38 +1,84 @@
 # Example / starting point for tpc_variables.sh (copy to tpc_variables.sh and edit).
-REPO="TPC"
-REPO_URL="https://github.com/ivanievlev/TPC"
-REPO_BRANCH="MERGE_TPCH"
-TPC_MODE="TPC-DS"
-ADMIN_USER="postgres"
-DBNAME="pg_tpc"
-DAT_FILE_SUBDIRECTORY_NAME="datfiles"
-EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
-EXPLAIN_ANALYZE="false"
-RANDOM_DISTRIBUTION="false"
-MULTI_USER_COUNT="5"
-GEN_DATA_SCALE="30"
-SINGLE_USER_ITERATIONS="1"
-PARTITION_EVERY_FACTOR="1"
-EXCLUDE_HEAVY_QUERIES="false"
-SKIP_QUERIES_LIST=""
-EMPTY_SCHEMAS_CNT="0"
-TRUNCATE_BEFORE_LOAD="true"
-SQL_ON_ERROR_STOP="false"
-STATEMENT_TIMEOUT="1h"
-RUN_COMPILE_TPC="true"
-RUN_GEN_DATA="true"
-RUN_INIT="true"
-RUN_DDL="true"
-RUN_LOAD="true"
-RUN_SQL="true"
-RUN_SINGLE_USER_REPORT="true"
-RUN_MULTI_USER="true"
-RUN_MULTI_USER_REPORT="true"
-RUN_SCORE="true"
-USE_EXTERNAL_FORMAT="false"
-RUN_SQL_WITH_DUCKDB="false"
-PURGE_OLD_EXTERNAL_DATA="true"
-KILL_PREVIOUS_PROCESSES="true"
-DROP_CACHE_BEFORE_SQL="false"
-COLLECT_OS_DATA="true"
-COLLECT_DATA_PERIOD="5s"
+
+##############################################################################
+# Generic
+##############################################################################
+REPO_BRANCH="MERGE_TPCH"  # Git branch tpc.sh checks out in this clone before the run.
+TPC_MODE="TPC-DS"  # Benchmark to execute: TPC-DS or TPC-H.
+GEN_DATA_SCALE="30"  # Scale factor in gigabytes for data generation and query substitution.
+ADMIN_USER="postgres"  # OS account used for privileged cluster and psql work (gpadmin or postgres).
+RUN_SQL_FROM_ROLE="postgres"  # Database role that executes the query workload.
+DBNAME="pg_tpc"  # Target database name for this run.
+PGPORT_WRITE="5432"  # TCP port for compile, gen, init, DDL, load, reports, and score.
+PGPORT_SELECT="5432"  # TCP port for the 05_sql and 07_multi_user query workload.
+PGHOST=""  # libpq host; empty uses a Unix socket, 127.0.0.1 is required for HAProxy.
+MULTI_USER_COUNT="5"  # Number of concurrent query streams in the 07_multi_user step.
+SINGLE_USER_ITERATIONS="1"  # How many times to repeat the single-user query stream.
+DAT_FILE_SUBDIRECTORY_NAME="datfiles"  # Directory name under EXTERNAL_FILE_DIRECTORY_PATH for generated .dat files.
+EXTERNAL_FILE_DIRECTORY_PATH="/tmp"  # Absolute root for .dat and parquet/csv/json trees.
+EXPLAIN_ANALYZE="false"  # Prefix 05_sql statements with EXPLAIN ANALYZE; ignored by 07_multi_user.
+RANDOM_DISTRIBUTION="false"  # Greenplum: distribute tables randomly instead of the default keys.
+EMPTY_SCHEMAS_CNT="0"  # Extra empty schemas (tpcdsN / tpchN) created for catalog stress.
+TRUNCATE_BEFORE_LOAD="true"  # Truncate heap tables (or wipe the current external tree) before load.
+DELETE_DAT_FILES_BEFORE_SQL="false"  # Remove generated .dat files after load and before queries.
+DROP_CACHE_BEFORE_SQL="false"  # Drop the OS page cache once before the first 05_sql iteration.
+SQL_ON_ERROR_STOP="false"  # Stop the SQL step on the first query error when true.
+STATEMENT_TIMEOUT="1h"  # PostgreSQL statement_timeout for 05_sql and 07_multi_user sessions.
+MAKE_PREREQUISITES="false"  # When true, apply jumbo frames and start a stopped Greenplum cluster.
+KILL_PREVIOUS_PROCESSES="true"  # Kill leftover TPC processes and backends from a previous unfinished run.
+COLLECT_OS_DATA="true"  # Sample local CPU/RAM/network/disk metrics for the score report.
+COLLECT_DATA_PERIOD="5s"  # Sampling interval for the OS metrics collector.
+
+##############################################################################
+# Steps
+##############################################################################
+RUN_COMPILE_TPC="true"  # Build dsdgen/dsqgen or dbgen/qgen and copy query templates.
+RUN_GEN_DATA="true"  # Generate flat .dat / .tbl files at GEN_DATA_SCALE.
+RUN_INIT="true"  # Create the database and apply cluster init settings.
+RUN_DDL="true"  # Create schemas, tables or external views.
+RUN_LOAD="true"  # Load heap tables or convert .dat files to parquet/csv/json.
+RUN_SINGLE_USER="true"  # Run the single-user query stream (05_sql) and its report (06).
+RUN_MULTI_USER="true"  # Run concurrent streams (07_multi_user) and the multi-user report (08).
+RUN_SCORE="true"  # Print the SCORE summary (09_score).
+
+##############################################################################
+# Postgres-specific
+##############################################################################
+RUN_SQL_WITH_DUCKDB="false"  # Force pg_duckdb execution for 05_sql and 07_multi_user sessions.
+DUCKDB_MEMORY_LIMIT="4GB"  # duckdb.memory_limit for each query session.
+DUCKDB_THREADS="-1"  # duckdb.threads (-1 lets DuckDB choose).
+DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"  # duckdb.max_workers_per_postgres_scan per session.
+DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"  # duckdb.threads_for_postgres_scan per session.
+USE_EXTERNAL_FORMAT="false"  # false=heap tables; parquet/csv/json=views over local files.
+EXTERNAL_HIVE_PARTITIONING="false"  # Write and read external files as year=/month= hive directories.
+EXTERNAL_FILE_SIZE_BYTES="-1"  # DuckDB FILE_SIZE_BYTES for COPY; -1 writes a single file.
+EXTERNAL_COMPRESSION="false"  # DuckDB COMPRESSION codec for COPY, or false to omit it.
+PURGE_OLD_EXTERNAL_DATA="true"  # Delete previous tpcds_*/tpch_* parquet/csv/json trees before load.
+APPLY_PGCONFIG_PARAMETERS="false"  # Apply pgconfig.org ALTER SYSTEM recommendations and restart Postgres.
+
+##############################################################################
+# Greenplum-specific
+##############################################################################
+PARTITION_EVERY_FACTOR="1"  # Divisor for Greenplum PARTITION BY RANGE ... EVERY (heap DDL only).
+EXCLUDE_HEAVY_QUERIES="false"  # Skip the hardcoded heavy TPC-DS query set on Greenplum.
+REFERENCE_TABLE_TYPE="aoco"  # Storage for SMALL_STORAGE tables: aoco, aoro, or heap.
+HEAP_ONLY="false"  # When true, force heap storage for all tagged Greenplum tables.
+NETWORK_INTERFACE_JUMBOFRAME="eth0"  # NIC name used when MAKE_PREREQUISITES sets MTU 9000.
+SET_ORCA_OPTIMIZER="on"  # Greenplum optimizer GUC: on=ORCA, off=Postgres planner.
+net_core_wmem="26214400"  # sysctl net.core.wmem_max applied during 02_init on Greenplum.
+rg6_memory_limit="80"  # GP6 admin_group MEMORY_LIMIT percent.
+rg6_memory_shared_quota="80"  # GP6 admin_group MEMORY_SHARED_QUOTA percent.
+rg6_concurrency="100"  # GP6 admin_group CONCURRENCY.
+rg6_cpu_rate_limit="70"  # GP6 admin_group CPU_RATE_LIMIT percent.
+rg7_cpu_hard_quota_limit="100"  # GP7 admin_group CPU_HARD_QUOTA_LIMIT percent.
+net_core_rmem="26214400"  # sysctl net.core.rmem_max applied during 02_init on Greenplum.
+
+##############################################################################
+# TPCDS-specific
+##############################################################################
+SKIP_TPCDS_QUERIES_LIST=""  # Comma-separated TPC-DS query numbers (1..99) to skip in 05 and 07.
+
+##############################################################################
+# TPCH-specific
+##############################################################################
+SKIP_TPCH_QUERIES_LIST=""  # Comma-separated TPC-H query numbers (1..22) to skip in 05 and 07.

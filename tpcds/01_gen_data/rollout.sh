@@ -4,12 +4,10 @@ set -e
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../../functions.sh
 source_bashrc
-DBNAME=${27}
+source $PWD/../../parse_step_args.sh
 
 step=gen_data
 init_log $step
-
-GEN_DATA_SCALE=$1
 
 if [ "$GEN_DATA_SCALE" == "" ]; then
 	echo "You must provide the scale as a parameter in terms of Gigabytes."

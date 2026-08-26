@@ -1,67 +1,23 @@
 #!/bin/bash
-
 set -e
 
-GEN_DATA_SCALE=$1
-EXPLAIN_ANALYZE=$2
-RANDOM_DISTRIBUTION=$3
-MULTI_USER_COUNT=$4
-EXCLUDE_HEAVY_QUERIES=$7
-SQL_ON_ERROR_STOP=${10}
-DBNAME=${27}
-STATEMENT_TIMEOUT=${28}
-USE_EXTERNAL_FORMAT=${29}
-EXTERNAL_HIVE_PARTITIONING=${30}
-EXTERNAL_FILE_SIZE_BYTES=${31}
-EXTERNAL_COMPRESSION=${32}
-RUN_SQL_WITH_DUCKDB=${33}
-DUCKDB_MEMORY_LIMIT=${35}
-DUCKDB_THREADS=${36}
-DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${37}
-DUCKDB_THREADS_FOR_POSTGRES_SCAN=${38}
-SKIP_QUERIES_LIST=${41}
-
+PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+source $PWD/../../functions.sh
+source_bashrc
+source $PWD/../../parse_step_args.sh
+source $PWD/../../mode.sh
+init_tpc_mode
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" ]]; then
-        echo "You must provide the scale as a parameter in terms of Gigabytes, true/false to run queries with EXPLAIN ANALYZE option, true/false to use random distrbution, and the number of concurrent users to run."
-        echo "Example: ./rollout.sh 100 false false 5"
-        echo "This will create 100 GB of data for this test, not run EXPLAIN ANALYZE, not use random distribution and use 5 sessions for the multi-user test."
-        exit 1
+	echo "Missing required parameters from tpc_variables.sh (scale, explain, random, multi-user count)."
+	exit 1
 fi
-if [ -z "$STATEMENT_TIMEOUT" ]; then
-	STATEMENT_TIMEOUT="1h"
-fi
-if [ -z "$RUN_SQL_WITH_DUCKDB" ]; then
-	RUN_SQL_WITH_DUCKDB="false"
-fi
-if [ -z "$DUCKDB_MEMORY_LIMIT" ]; then
-	DUCKDB_MEMORY_LIMIT="4GB"
-fi
-if [ -z "$DUCKDB_THREADS" ]; then
-	DUCKDB_THREADS="-1"
-fi
-if [ -z "$DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN" ]; then
-	DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"
-fi
-if [ -z "$DUCKDB_THREADS_FOR_POSTGRES_SCAN" ]; then
-	DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
-fi
-if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
-	SKIP_QUERIES_LIST=""
-fi
-# functions.sh is sourced below after PWD is set for multi-user; validate after that.
+validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
 if [ "$MULTI_USER_COUNT" -eq "0" ]; then
 	echo "MULTI_USER_COUNT set at 0 so exiting..."
 	exit 0
 fi
-
-PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
-source $PWD/../../functions.sh
-source_bashrc
-set_tpc_pgport_for_step "$PWD"
-apply_tpc_pgport
-validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
 get_file_count()
 {

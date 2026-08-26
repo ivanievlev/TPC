@@ -4,19 +4,10 @@ set -e
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../../functions.sh
 source_bashrc
+source $PWD/../../parse_step_args.sh
 source $PWD/../../mode.sh
 init_tpc_mode
 
-GEN_DATA_SCALE=$1
-DBNAME=${27}
-USE_EXTERNAL_FORMAT=${29}
-EXTERNAL_HIVE_PARTITIONING=${30}
-EXTERNAL_FILE_SIZE_BYTES=${31}
-EXTERNAL_COMPRESSION=${32}
-RUN_SQL_WITH_DUCKDB=${33}
-PURGE_OLD_EXTERNAL_DATA=${34}
-
-TRUNCATE_BEFORE_LOAD=$9
 step=load
 init_log $step
 source $PWD/../../external_format.sh

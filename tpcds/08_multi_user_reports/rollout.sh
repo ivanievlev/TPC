@@ -4,7 +4,7 @@ set -e
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../../functions.sh
 source_bashrc
-DBNAME=${27}
+source $PWD/../../parse_step_args.sh
 
 
 step="multi_user_reports"

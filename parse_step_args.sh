@@ -1,76 +1,49 @@
 #!/bin/bash
-# Parse the unified TPC rollout → step argument vector (same layout as TPC-DS steps).
+# Load knobs from tpc_variables.sh (harness root). Positional step arguments are not used.
 # Source after: set -e; PWD=...; source functions.sh
-#
-# Positional map (from rollout.sh):
-#  1 GEN_DATA_SCALE  2 EXPLAIN_ANALYZE  3 RANDOM_DISTRIBUTION  4 MULTI_USER_COUNT
-#  5 SINGLE_USER_ITERATIONS  6 PARTITION_EVERY_FACTOR  7 EXCLUDE_HEAVY_QUERIES
-#  8 EMPTY_SCHEMAS_CNT  9 TRUNCATE_BEFORE_LOAD  10 SQL_ON_ERROR_STOP
-#  11-17 net/rg knobs  18 DELETE_DAT_FILES  19 RUN_SQL_FROM_ROLE
-#  20 DROP_CACHE_BEFORE_SQL  21 HEAP_ONLY  22 ADMIN_USER  23 MAKE_PREREQUISITES
-#  24 NETWORK_JUMBO  25 SET_ORCA  26 REFERENCE_TABLE_TYPE
-#  27 DBNAME  28 STATEMENT_TIMEOUT
-#  29-34 external/duckdb/purge  35-38 duckdb session
-#  39 COLLECT_OS_DATA  40 COLLECT_DATA_PERIOD  41 SKIP_QUERIES_LIST
-#  42 DAT_FILE_SUBDIRECTORY_NAME  43 EXTERNAL_FILE_DIRECTORY_PATH
 
-GEN_DATA_SCALE=${1:-}
-EXPLAIN_ANALYZE=${2:-}
-RANDOM_DISTRIBUTION=${3:-}
-MULTI_USER_COUNT=${4:-}
-SINGLE_USER_ITERATIONS=${5:-}
-PARTITION_EVERY_FACTOR=${6:-}
-EXCLUDE_HEAVY_QUERIES=${7:-}
-EMPTY_SCHEMAS_CNT=${8:-0}
+_TPC_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [ ! -f "$_TPC_ROOT/tpc_variables.sh" ]; then
+	echo "ERROR: tpc_variables.sh not found in $_TPC_ROOT"
+	exit 1
+fi
+if [ "${TPC_VARIABLES_LOADED:-}" != "1" ]; then
+	# shellcheck disable=SC1091
+	source "$_TPC_ROOT/tpc_variables.sh"
+	# Do not export this flag: child step scripts must re-source tpc_variables.sh
+	# (only exported variables are inherited, and knobs are not all exported).
+	TPC_VARIABLES_LOADED=1
+fi
+unset _TPC_ROOT
+
+REPO="TPC"
+
+# Compatibility if an old environment still exports RUN_SQL.
+if [ -z "${RUN_SINGLE_USER:-}" ] && [ -n "${RUN_SQL:-}" ]; then
+	RUN_SINGLE_USER="$RUN_SQL"
+fi
+if [ -z "${SKIP_TPCDS_QUERIES_LIST+x}" ] && [ -n "${SKIP_QUERIES_LIST+x}" ]; then
+	SKIP_TPCDS_QUERIES_LIST="$SKIP_QUERIES_LIST"
+fi
+if [ -z "${SKIP_TPCH_QUERIES_LIST+x}" ] && [ -n "${SKIP_QUERIES_LIST+x}" ]; then
+	SKIP_TPCH_QUERIES_LIST="$SKIP_QUERIES_LIST"
+fi
+
+# Legacy alias used by tpcds/02_init
+if [ -z "${SET_OPTIMIZER:-}" ] && [ -n "${SET_ORCA_OPTIMIZER:-}" ]; then
+	SET_OPTIMIZER="$SET_ORCA_OPTIMIZER"
+fi
+
 # Legacy alias
 if [ -z "$EMPTY_SCHEMAS_CNT" ] && [ -n "${EXTRA_TPCDS_SCHEMAS:-}" ]; then
 	EMPTY_SCHEMAS_CNT="$EXTRA_TPCDS_SCHEMAS"
 fi
-TRUNCATE_BEFORE_LOAD=${9:-}
-SQL_ON_ERROR_STOP=${10:-}
-net_core_rmem=${11:-}
-net_core_wmem=${12:-}
-rg6_memory_limit=${13:-}
-rg6_memory_shared_quota=${14:-}
-rg6_concurrency=${15:-}
-rg6_cpu_rate_limit=${16:-}
-rg7_cpu_hard_quota_limit=${17:-}
-DELETE_DAT_FILES_BEFORE_SQL=${18:-}
-RUN_SQL_FROM_ROLE=${19:-}
-DROP_CACHE_BEFORE_SQL=${20:-false}
+if [ -z "$EMPTY_SCHEMAS_CNT" ]; then
+	EMPTY_SCHEMAS_CNT="0"
+fi
 if [ -z "$DROP_CACHE_BEFORE_SQL" ]; then
 	DROP_CACHE_BEFORE_SQL="false"
 fi
-HEAP_ONLY=${21:-}
-ADMIN_USER=${22:-}
-MAKE_PREREQUISITES=${23:-}
-NETWORK_INTERFACE_JUMBOFRAME=${24:-}
-SET_ORCA_OPTIMIZER=${25:-}
-REFERENCE_TABLE_TYPE=${26:-}
-DBNAME=${27:-}
-STATEMENT_TIMEOUT=${28:-}
-USE_EXTERNAL_FORMAT=${29:-}
-EXTERNAL_HIVE_PARTITIONING=${30:-}
-EXTERNAL_FILE_SIZE_BYTES=${31:-}
-EXTERNAL_COMPRESSION=${32:-}
-RUN_SQL_WITH_DUCKDB=${33:-}
-PURGE_OLD_EXTERNAL_DATA=${34:-}
-DUCKDB_MEMORY_LIMIT=${35:-}
-DUCKDB_THREADS=${36:-}
-DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${37:-}
-DUCKDB_THREADS_FOR_POSTGRES_SCAN=${38:-}
-COLLECT_OS_DATA=${39:-true}
-COLLECT_DATA_PERIOD=${40:-5s}
-SKIP_QUERIES_LIST=${41:-}
-DAT_FILE_SUBDIRECTORY_NAME=${42:-}
-EXTERNAL_FILE_DIRECTORY_PATH=${43:-}
-if type normalize_dat_file_subdirectory_name >/dev/null 2>&1; then
-	normalize_dat_file_subdirectory_name
-fi
-if type normalize_external_file_directory_path >/dev/null 2>&1; then
-	normalize_external_file_directory_path
-fi
-
 if [ -z "$STATEMENT_TIMEOUT" ]; then
 	STATEMENT_TIMEOUT="1h"
 fi
@@ -95,12 +68,32 @@ fi
 if [ -z "$COLLECT_DATA_PERIOD" ]; then
 	COLLECT_DATA_PERIOD="5s"
 fi
-if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
-	SKIP_QUERIES_LIST=""
+if [ -z "${SKIP_TPCDS_QUERIES_LIST+x}" ]; then
+	SKIP_TPCDS_QUERIES_LIST=""
+fi
+if [ -z "${SKIP_TPCH_QUERIES_LIST+x}" ]; then
+	SKIP_TPCH_QUERIES_LIST=""
 fi
 if [ -z "$USE_EXTERNAL_FORMAT" ]; then
 	USE_EXTERNAL_FORMAT="false"
 fi
+if [ -z "$TRUNCATE_BEFORE_LOAD" ]; then
+	TRUNCATE_BEFORE_LOAD="true"
+fi
+if [ -z "$SQL_ON_ERROR_STOP" ]; then
+	SQL_ON_ERROR_STOP="true"
+fi
+if [ -z "$APPLY_PGCONFIG_PARAMETERS" ]; then
+	APPLY_PGCONFIG_PARAMETERS="false"
+fi
+
+if type normalize_dat_file_subdirectory_name >/dev/null 2>&1; then
+	normalize_dat_file_subdirectory_name
+fi
+if type normalize_external_file_directory_path >/dev/null 2>&1; then
+	normalize_external_file_directory_path
+fi
+
 if type apply_tpc_pgport >/dev/null 2>&1; then
 	if type set_tpc_pgport_for_step >/dev/null 2>&1; then
 		set_tpc_pgport_for_step "$PWD"
@@ -115,9 +108,6 @@ else
 		export PGHOST
 	fi
 fi
-if [ -z "$TRUNCATE_BEFORE_LOAD" ]; then
-	TRUNCATE_BEFORE_LOAD="true"
-fi
-if [ -z "$SQL_ON_ERROR_STOP" ]; then
-	SQL_ON_ERROR_STOP="true"
-fi
+
+export REPO RUN_SINGLE_USER RUN_MULTI_USER SKIP_TPCDS_QUERIES_LIST SKIP_TPCH_QUERIES_LIST
+export APPLY_PGCONFIG_PARAMETERS PGPORT_WRITE PGPORT_SELECT SET_OPTIMIZER SET_ORCA_OPTIMIZER

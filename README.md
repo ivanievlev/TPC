@@ -1,6 +1,6 @@
 # Unified TPC harness (TPC-DS + TPC-H)
 
-`REPO="TPC"` / `REPO_URL="https://github.com/ivanievlev/TPC"`
+The clone directory name is always `TPC`. `tpc.sh` reads `REPO_URL` from `git remote get-url origin` (not from `tpc_variables.sh`).
 
 Select the benchmark with:
 
@@ -9,7 +9,7 @@ TPC_MODE="TPC-DS"   # default — tpcds/00_compile_tpcds … tpcds/09_score
 TPC_MODE="TPC-H"    # tpch/00_compile_tpch … tpch/09_score
 ```
 
-Shared knobs in `tpc_variables.sh` (`GEN_DATA_SCALE`, `STATEMENT_TIMEOUT`, DuckDB, `SKIP_QUERIES_LIST`, `RUN_*`, `COLLECT_OS_DATA`, …) apply to **both** modes. Entry point: `./tpc.sh`.
+Knobs live in `tpc_variables.sh`, grouped as Generic, Steps, Postgres-specific, Greenplum-specific, TPCDS-specific, and TPCH-specific. Each variable has a one-sentence comment. Copy `tpc_variables.sh.example` for a starting template. Entry point: `./tpc.sh`.
 
 TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score reports 05_sql (`1 User Queries`, TPT, Score, success %) **per `SINGLE_USER_ITERATIONS` pass**, plus DAT/TBL size, DB or external storage size, 07 success rate, and (when `COLLECT_OS_DATA=true`) local OS CPU/RAM/network/disk averages for those steps.
 
@@ -22,7 +22,7 @@ TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (p
 - Changed compression options from quicklz to zstd
 - Added new parameters
 - Added `REPO_BRANCH` parameter to select the git branch used by `tpc.sh` (default: `main`)
-- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN`, `DUCKDB_THREADS_FOR_POSTGRES_SCAN`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`, `SKIP_QUERIES_LIST`
+- Added PostgreSQL/pg_duckdb local external formats: `USE_EXTERNAL_FORMAT` (`parquet`/`csv`/`json`), `EXTERNAL_HIVE_PARTITIONING`, `EXTERNAL_FILE_SIZE_BYTES`, `EXTERNAL_COMPRESSION`, `RUN_SQL_WITH_DUCKDB`, `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, `DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN`, `DUCKDB_THREADS_FOR_POSTGRES_SCAN`, `PURGE_OLD_EXTERNAL_DATA`, `KILL_PREVIOUS_PROCESSES`, `SKIP_TPCDS_QUERIES_LIST`, `SKIP_TPCH_QUERIES_LIST`
 
 ## Installation
 
@@ -68,9 +68,10 @@ Step logs go into subdirectories of `log/`:
 
 ## Basic parameters
 
-- REPO="TPC-DS"
-- REPO_URL="https://github.com/ivanievlev/TPC-DS"
+See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgres-specific, Greenplum-specific, TPCDS-specific, TPCH-specific).
+
 - REPO_BRANCH="main"
+- TPC_MODE="TPC-DS"
 - ADMIN_USER="postgres"
 - DAT_FILE_SUBDIRECTORY_NAME="datfiles"
 - EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
@@ -84,16 +85,15 @@ Step logs go into subdirectories of `log/`:
 - RUN_INIT="false"
 - RUN_DDL="false"
 - RUN_LOAD="false"
-- RUN_SQL="true"
-- RUN_SINGLE_USER_REPORT="true"
+- RUN_SINGLE_USER="true"
 - RUN_MULTI_USER="true"
-- RUN_MULTI_USER_REPORT="true"
 - RUN_SCORE="true"
 
 	``Each RUN_*=false skips that step entirely in rollout.sh (the step script is not called).
-	RUN_*=true removes the step's end_*.log and runs it. RUN_MULTI_USER and RUN_MULTI_USER_REPORT
-	are independent: with MULTI_USER=false and MULTI_USER_REPORT=true the report still runs on
-	whatever is already in log/rollout_testing_log/rollout_testing_*.log.``
+	RUN_*=true removes the step's end_*.log and runs it.
+	RUN_SINGLE_USER=true always runs 05_sql and then 06_single_user_reports.
+	RUN_MULTI_USER=true always runs 07_multi_user and then 08_multi_user_reports.
+	There are no separate report flags.``
 
 ## New Arenadata parameters
 
@@ -123,12 +123,18 @@ Step logs go into subdirectories of `log/`:
 
 	``It is used to run only 51 simplified out of 99 queries to make test shorter. Specify true to exclude heavy queries.``
 
-- SKIP_QUERIES_LIST=""
+- SKIP_TPCDS_QUERIES_LIST=""
 
-	``Comma-separated TPC-DS query numbers (1..99) to skip in steps 05 (single-user) and 07 (multi-user).
+	``Comma-separated TPC-DS query numbers (1..99) to skip in steps 05 (single-user) and 07 (multi-user) when TPC_MODE=TPC-DS.
 	Default empty: run all queries (subject to EXCLUDE_HEAVY_QUERIES).
-	Examples: SKIP_QUERIES_LIST="85" or SKIP_QUERIES_LIST="1,64,85".
+	Examples: SKIP_TPCDS_QUERIES_LIST="85" or SKIP_TPCDS_QUERIES_LIST="1,64,85".
 	Invalid values fail at startup: out-of-range (e.g. 164) or non-integer (e.g. n4).``
+
+- SKIP_TPCH_QUERIES_LIST=""
+
+	``Comma-separated TPC-H query numbers (1..22) to skip in steps 05 and 07 when TPC_MODE=TPC-H.
+	Default empty: run all 22 queries. Examples: SKIP_TPCH_QUERIES_LIST="1" or SKIP_TPCH_QUERIES_LIST="1,7,22".
+	Invalid values fail at startup.``
 
 - EMPTY_SCHEMAS_CNT="0"
 

@@ -3,74 +3,12 @@
 set -e
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/functions.sh
+source $PWD/parse_step_args.sh
 source $PWD/mode.sh
 source_bashrc
+init_tpc_mode
 apply_tpc_pgport
 
-GEN_DATA_SCALE="$1"
-EXPLAIN_ANALYZE="$2"
-RANDOM_DISTRIBUTION="$3"
-MULTI_USER_COUNT="$4"
-RUN_COMPILE_TPC="$5"
-RUN_GEN_DATA="$6"
-RUN_INIT="$7"
-RUN_DDL="$8"
-RUN_LOAD="$9"
-RUN_SQL="${10}"
-RUN_SINGLE_USER_REPORT="${11}"
-RUN_MULTI_USER="${12}"
-RUN_MULTI_USER_REPORT="${13}"
-RUN_SCORE="${14}"
-SINGLE_USER_ITERATIONS="${15}"
-PARTITION_EVERY_FACTOR="${16}"
-EXCLUDE_HEAVY_QUERIES="${17}"
-EMPTY_SCHEMAS_CNT="${18:-0}"
-TRUNCATE_BEFORE_LOAD="${19}"
-SQL_ON_ERROR_STOP="${20}"
-net_core_rmem="${21}"
-net_core_wmem="${22}"
-rg6_memory_limit="${23}"
-rg6_memory_shared_quota="${24}"
-rg6_concurrency="${25}"
-rg6_cpu_rate_limit="${26}"
-rg7_cpu_hard_quota_limit="${27}"
-DELETE_DAT_FILES_BEFORE_SQL="${28}"
-RUN_SQL_FROM_ROLE="${29}"
-REFERENCE_TABLE_TYPE="${30}"
-DROP_CACHE_BEFORE_SQL="${31}"
-HEAP_ONLY="${32}"
-ADMIN_USER="${33}"
-MAKE_PREREQUISITES="${34}"
-NETWORK_INTERFACE_JUMBOFRAME="${35}"
-SET_ORCA_OPTIMIZER="${36}"
-DBNAME="${37}"
-STATEMENT_TIMEOUT="${38}"
-USE_EXTERNAL_FORMAT="${39}"
-EXTERNAL_HIVE_PARTITIONING="${40}"
-EXTERNAL_FILE_SIZE_BYTES="${41}"
-EXTERNAL_COMPRESSION="${42}"
-RUN_SQL_WITH_DUCKDB="${43}"
-PURGE_OLD_EXTERNAL_DATA="${44}"
-DUCKDB_MEMORY_LIMIT="${45}"
-DUCKDB_THREADS="${46}"
-DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="${47}"
-DUCKDB_THREADS_FOR_POSTGRES_SCAN="${48}"
-COLLECT_OS_DATA="${49:-true}"
-COLLECT_DATA_PERIOD="${50:-5s}"
-SKIP_QUERIES_LIST="${51}"
-TPC_MODE="${52:-TPC-DS}"
-DAT_FILE_SUBDIRECTORY_NAME="${53}"
-EXTERNAL_FILE_DIRECTORY_PATH="${54}"
-APPLY_PGCONFIG_PARAMETERS="${APPLY_PGCONFIG_PARAMETERS:-false}"
-
-init_tpc_mode
-
-if [ -z "$COLLECT_OS_DATA" ]; then
-	COLLECT_OS_DATA="true"
-fi
-if [ -z "$COLLECT_DATA_PERIOD" ]; then
-	COLLECT_DATA_PERIOD="5s"
-fi
 export COLLECT_OS_DATA COLLECT_DATA_PERIOD APPLY_PGCONFIG_PARAMETERS PGPORT_WRITE PGPORT_SELECT
 if [ -z "${PGPORT:-}" ]; then
 	PGPORT="${PGPORT_WRITE:-5432}"
@@ -82,56 +20,12 @@ else
 	unset PGHOST
 fi
 
-if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPC" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SQL" == "" || "$RUN_SINGLE_USER_REPORT" == "" || "$RUN_MULTI_USER" == "" || "$RUN_MULTI_USER_REPORT" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
-	echo "Please run this script from tpc.sh so the correct parameters are passed to it."
+if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPC" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SINGLE_USER" == "" || "$RUN_MULTI_USER" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
+	echo "Please run this script from tpc.sh so tpc_variables.sh is complete."
 	exit 1
-fi
-if [ -z "$STATEMENT_TIMEOUT" ]; then
-	STATEMENT_TIMEOUT="1h"
-fi
-if [ -z "$USE_EXTERNAL_FORMAT" ]; then
-	USE_EXTERNAL_FORMAT="false"
-fi
-if [ -z "$EXTERNAL_HIVE_PARTITIONING" ]; then
-	EXTERNAL_HIVE_PARTITIONING="false"
-fi
-if [ -z "$EXTERNAL_FILE_SIZE_BYTES" ]; then
-	EXTERNAL_FILE_SIZE_BYTES="-1"
-fi
-if [ -z "$EXTERNAL_COMPRESSION" ]; then
-	EXTERNAL_COMPRESSION="false"
-fi
-if [ -z "$RUN_SQL_WITH_DUCKDB" ]; then
-	RUN_SQL_WITH_DUCKDB="false"
-fi
-if [ -z "$PURGE_OLD_EXTERNAL_DATA" ]; then
-	PURGE_OLD_EXTERNAL_DATA="true"
-fi
-if [ -z "$DUCKDB_MEMORY_LIMIT" ]; then
-	DUCKDB_MEMORY_LIMIT="4GB"
-fi
-if [ -z "$DUCKDB_THREADS" ]; then
-	DUCKDB_THREADS="-1"
-fi
-if [ -z "$DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN" ]; then
-	DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"
-fi
-if [ -z "$DUCKDB_THREADS_FOR_POSTGRES_SCAN" ]; then
-	DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
-fi
-if [ -z "$COLLECT_OS_DATA" ]; then
-	COLLECT_OS_DATA="true"
-fi
-if [ -z "$COLLECT_DATA_PERIOD" ]; then
-	COLLECT_DATA_PERIOD="5s"
-fi
-if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
-	SKIP_QUERIES_LIST=""
 fi
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
-normalize_dat_file_subdirectory_name
-normalize_external_file_directory_path
 export DAT_FILE_SUBDIRECTORY_NAME EXTERNAL_FILE_DIRECTORY_PATH
 
 hive_on=$(echo "${EXTERNAL_HIVE_PARTITIONING}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
@@ -229,15 +123,15 @@ echo "RUN_GEN_DATA: $RUN_GEN_DATA"
 echo "RUN_INIT: $RUN_INIT"
 echo "RUN_DDL: $RUN_DDL"
 echo "RUN_LOAD: $RUN_LOAD"
-echo "RUN_SQL: $RUN_SQL"
+echo "RUN_SINGLE_USER: $RUN_SINGLE_USER"
 echo "SINGLE_USER_ITERATIONS: $SINGLE_USER_ITERATIONS"
-echo "RUN_SINGLE_USER_REPORT: $RUN_SINGLE_USER_REPORT"
 echo "RUN_MULTI_USER: $RUN_MULTI_USER"
-echo "RUN_MULTI_USER_REPORT: $RUN_MULTI_USER_REPORT"
 echo "RUN_SCORE: $RUN_SCORE"
 echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"
 echo "EXCLUDE_HEAVY_QUERIES: $EXCLUDE_HEAVY_QUERIES"
-echo "SKIP_QUERIES_LIST: $SKIP_QUERIES_LIST"
+echo "SKIP_TPCDS_QUERIES_LIST: $SKIP_TPCDS_QUERIES_LIST"
+echo "SKIP_TPCH_QUERIES_LIST: $SKIP_TPCH_QUERIES_LIST"
+echo "SKIP_QUERIES_LIST (active): $SKIP_QUERIES_LIST"
 echo "EMPTY_SCHEMAS_CNT: $EMPTY_SCHEMAS_CNT"
 echo "COLLECT_OS_DATA: $COLLECT_OS_DATA"
 echo "COLLECT_DATA_PERIOD: $COLLECT_DATA_PERIOD"
@@ -275,20 +169,16 @@ fi
 if [ "$RUN_LOAD" == "true" ]; then
 	rm -f $PWD/log/end_load.log
 fi
-if [ "$RUN_SQL" == "true" ]; then
+if [ "$RUN_SINGLE_USER" == "true" ]; then
 	rm -f $PWD/log/end_sql.log
-fi
-if [ "$RUN_SINGLE_USER_REPORT" == "true" ]; then
 	rm -f $PWD/log/end_single_user_reports.log
 fi
 if [ "$RUN_MULTI_USER" == "true" ]; then
 	rm -f $PWD/log/end_testing_log/end_testing_*.log
-fi
-if [ "$RUN_MULTI_USER_REPORT" == "true" ]; then
 	rm -f $PWD/log/end_multi_user_reports.log
 fi
 
-export RUN_MULTI_USER RUN_MULTI_USER_REPORT APPLY_PGCONFIG_PARAMETERS
+export RUN_MULTI_USER APPLY_PGCONFIG_PARAMETERS
 if [ "$RUN_SCORE" == "true" ]; then
 	rm -f $PWD/log/end_score.log
 fi
@@ -303,16 +193,14 @@ step_run_flag()
 		02_init) echo "$RUN_INIT" ;;
 		03_ddl) echo "$RUN_DDL" ;;
 		04_load) echo "$RUN_LOAD" ;;
-		05_sql) echo "$RUN_SQL" ;;
-		06_single_user_reports) echo "$RUN_SINGLE_USER_REPORT" ;;
+		05_sql) echo "$RUN_SINGLE_USER" ;;
+		06_single_user_reports) echo "$RUN_SINGLE_USER" ;;
 		07_multi_user) echo "$RUN_MULTI_USER" ;;
-		08_multi_user_reports) echo "$RUN_MULTI_USER_REPORT" ;;
+		08_multi_user_reports) echo "$RUN_MULTI_USER" ;;
 		09_score) echo "$RUN_SCORE" ;;
 		*) echo "true" ;;
 	esac
 }
-
-STEP_ARGS="$GEN_DATA_SCALE $EXPLAIN_ANALYZE $RANDOM_DISTRIBUTION $MULTI_USER_COUNT $SINGLE_USER_ITERATIONS $PARTITION_EVERY_FACTOR $EXCLUDE_HEAVY_QUERIES $EMPTY_SCHEMAS_CNT $TRUNCATE_BEFORE_LOAD $SQL_ON_ERROR_STOP $net_core_rmem $net_core_wmem $rg6_memory_limit $rg6_memory_shared_quota $rg6_concurrency $rg6_cpu_rate_limit $rg7_cpu_hard_quota_limit $DELETE_DAT_FILES_BEFORE_SQL $RUN_SQL_FROM_ROLE $DROP_CACHE_BEFORE_SQL $HEAP_ONLY $ADMIN_USER $MAKE_PREREQUISITES $NETWORK_INTERFACE_JUMBOFRAME $SET_ORCA_OPTIMIZER $REFERENCE_TABLE_TYPE $DBNAME $STATEMENT_TIMEOUT $USE_EXTERNAL_FORMAT $EXTERNAL_HIVE_PARTITIONING $EXTERNAL_FILE_SIZE_BYTES $EXTERNAL_COMPRESSION $RUN_SQL_WITH_DUCKDB $PURGE_OLD_EXTERNAL_DATA $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN $COLLECT_OS_DATA $COLLECT_DATA_PERIOD"
 
 while IFS= read -r i; do
 	[ -z "$i" ] && continue
@@ -327,5 +215,5 @@ while IFS= read -r i; do
 	echo "  PGPORT=$PGPORT (WRITE=$PGPORT_WRITE SELECT=$PGPORT_SELECT)"
 	# Close stdin so step scripts (ssh, tools, etc.) cannot consume the step list
 	# from this while-read loop (classic bash pitfall).
-	$i/rollout.sh $STEP_ARGS "$SKIP_QUERIES_LIST" "$DAT_FILE_SUBDIRECTORY_NAME" "$EXTERNAL_FILE_DIRECTORY_PATH" </dev/null
+	$i/rollout.sh </dev/null
 done < <(tpc_step_dirs "$PWD")

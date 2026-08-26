@@ -4,62 +4,13 @@ set -e
 PWD=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source $PWD/../../functions.sh
 source_bashrc
-set_tpc_pgport_for_step "$PWD"
-apply_tpc_pgport
-
-GEN_DATA_SCALE=$1
-EXPLAIN_ANALYZE=$2
-RANDOM_DISTRIBUTION=$3
-MULTI_USER_COUNT=$4
-SINGLE_USER_ITERATIONS=$5
-EXCLUDE_HEAVY_QUERIES=$7
-SQL_ON_ERROR_STOP=${10}
-DELETE_DAT_FILES_BEFORE_SQL="${18}"
-RUN_SQL_FROM_ROLE="${19}"
-DROP_CACHE_BEFORE_SQL="${20}"
-if [ -z "$DROP_CACHE_BEFORE_SQL" ]; then
-	DROP_CACHE_BEFORE_SQL="false"
-fi
-DBNAME=${27}
-STATEMENT_TIMEOUT=${28}
-USE_EXTERNAL_FORMAT=${29}
-EXTERNAL_HIVE_PARTITIONING=${30}
-EXTERNAL_FILE_SIZE_BYTES=${31}
-EXTERNAL_COMPRESSION=${32}
-RUN_SQL_WITH_DUCKDB=${33}
-DUCKDB_MEMORY_LIMIT=${35}
-DUCKDB_THREADS=${36}
-DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN=${37}
-DUCKDB_THREADS_FOR_POSTGRES_SCAN=${38}
-SKIP_QUERIES_LIST=${41}
-DAT_FILE_SUBDIRECTORY_NAME=${42}
-EXTERNAL_FILE_DIRECTORY_PATH=${43}
+source $PWD/../../parse_step_args.sh
+source $PWD/../../mode.sh
+init_tpc_mode
 
 if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
-	echo "You must provide the scale as a parameter in terms of Gigabytes, true/false to run queries with EXPLAIN ANALYZE option, true/false to use random distrbution, multi-user count, and the number of sql iterations."
-	echo "Example: ./rollout.sh 100 false false 5 1"
+	echo "Missing required parameters from tpc_variables.sh (scale, explain, random, multi-user, iterations)."
 	exit 1
-fi
-if [ -z "$STATEMENT_TIMEOUT" ]; then
-	STATEMENT_TIMEOUT="1h"
-fi
-if [ -z "$RUN_SQL_WITH_DUCKDB" ]; then
-	RUN_SQL_WITH_DUCKDB="false"
-fi
-if [ -z "$DUCKDB_MEMORY_LIMIT" ]; then
-	DUCKDB_MEMORY_LIMIT="4GB"
-fi
-if [ -z "$DUCKDB_THREADS" ]; then
-	DUCKDB_THREADS="-1"
-fi
-if [ -z "$DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN" ]; then
-	DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"
-fi
-if [ -z "$DUCKDB_THREADS_FOR_POSTGRES_SCAN" ]; then
-	DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
-fi
-if [ -z "${SKIP_QUERIES_LIST+x}" ]; then
-	SKIP_QUERIES_LIST=""
 fi
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
@@ -109,7 +60,7 @@ sql_file_list=""
 for i in $(ls $PWD/*.tpcds.*.sql); do
 	qnum=`echo $i | awk -F '.' '{print $3}'`
 	if should_skip_tpcds_query "$qnum"; then
-		echo "Skipping $qnum due to SKIP_QUERIES_LIST=${SKIP_QUERIES_LIST}."
+		echo "Skipping $qnum due to $(_tpc_skip_list_var_name)=${SKIP_QUERIES_LIST}."
 		continue
 	fi
 	if [ "$EXCLUDE_HEAVY_QUERIES" == "true" ]; then
