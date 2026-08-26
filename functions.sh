@@ -1323,3 +1323,76 @@ log_postgres_test_parameters()
 		echo "############################################################################"
 	} | tee "$out"
 }
+
+# First-column-only templates.lst for dsqgen (column 2+ is query labels).
+dsqgen_input_from_templates_lst()
+{
+	local src="$1"
+	local dst="$2"
+	if [ ! -f "$src" ]; then
+		echo "ERROR: templates list not found: $src"
+		return 1
+	fi
+	awk '
+		/^[[:space:]]*--/ { next }
+		/^[[:space:]]*$/ { next }
+		{ print $1 }
+	' "$src" > "$dst"
+}
+
+# SQL that creates TEMP TABLE tpc_query_labels from templates.lst (filename<TAB>labels).
+emit_tpc_query_labels_sql()
+{
+	local lst="$1"
+	if [ ! -f "$lst" ]; then
+		echo "CREATE TEMP TABLE tpc_query_labels (id text PRIMARY KEY, template text, query_label text);"
+		return 0
+	fi
+	awk -f - "$lst" <<'AWK'
+BEGIN {
+	print "CREATE TEMP TABLE tpc_query_labels (id text PRIMARY KEY, template text, query_label text);"
+}
+/^[[:space:]]*--/ { next }
+NF < 1 { next }
+{
+	fn = $1
+	labels = $0
+	sub(/^[^ \t]+[ \t]*/, "", labels)
+	if (labels == $0)
+		labels = ""
+	n = 0
+	if (fn ~ /^query[0-9]+\.tpl$/)
+		n = substr(fn, 6, length(fn) - 9) + 0
+	else if (fn ~ /^[0-9]+\.sql$/)
+		n = substr(fn, 1, length(fn) - 4) + 0
+	else
+		next
+	gsub(/'/, "''", fn)
+	gsub(/'/, "''", labels)
+	if (!started) {
+		print "INSERT INTO tpc_query_labels (id, template, query_label) VALUES"
+		started = 1
+	} else
+		print ","
+	printf "('%02d', '%s', '%s')", n, fn, labels
+}
+END {
+	if (started)
+		print ";"
+}
+AWK
+}
+
+# Run a report SQL file after loading query labels from templates.lst.
+# Extra args are passed to psql (e.g. -P pager=off -P format=aligned -P border=1).
+psql_report_with_query_labels()
+{
+	local lst="$1"
+	local sqlfile="$2"
+	shift 2
+	local tmp
+	tmp=$(mktemp)
+	emit_tpc_query_labels_sql "$lst" > "$tmp"
+	psql -d "$DBNAME" -v ON_ERROR_STOP=1 "$@" -f "$tmp" -f "$sqlfile"
+	rm -f "$tmp"
+}

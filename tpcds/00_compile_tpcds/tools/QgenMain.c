@@ -200,6 +200,11 @@ parseQueries(void)
 			continue;
 		if ((cp = strchr(szFileName, '\n')))
 			*cp = '\0';
+		if ((cp = strchr(szFileName, '\r')))
+			*cp = '\0';
+		/* Optional labels after the filename (templates.lst column 2+). */
+		if ((cp = strpbrk(szFileName, " \t")))
+			*cp = '\0';
 		if (!strlen(szFileName))
 			continue;
 			

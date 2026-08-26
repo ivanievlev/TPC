@@ -60,6 +60,6 @@ echo ""
 echo "********************************************************************************"
 echo "Queries"
 echo "********************************************************************************"
-psql -d $DBNAME -F $'\t' -A -v ON_ERROR_STOP=1 -P pager=off -f $PWD/queries_report.sql
+psql_report_with_query_labels "$PWD/../00_compile_tpch/dbgen/queries/templates.lst" "$PWD/queries_report.sql" -P pager=off -P format=aligned -P border=1
 echo ""
 end_step $step

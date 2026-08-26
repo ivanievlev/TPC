@@ -20,8 +20,11 @@ fi
 
 rm -f $PWD/query_0.sql
 
-echo "$PWD/dsqgen -input $PWD/query_templates/templates.lst -directory $PWD/query_templates -dialect pivotal -scale $GEN_DATA_SCALE -verbose y -output $PWD"
-$PWD/dsqgen -input $PWD/query_templates/templates.lst -directory $PWD/query_templates -dialect pivotal -scale $GEN_DATA_SCALE -verbose y -output $PWD
+dsqgen_lst=$(mktemp)
+dsqgen_input_from_templates_lst "$PWD/query_templates/templates.lst" "$dsqgen_lst"
+echo "$PWD/dsqgen -input $dsqgen_lst -directory $PWD/query_templates -dialect pivotal -scale $GEN_DATA_SCALE -verbose y -output $PWD"
+$PWD/dsqgen -input "$dsqgen_lst" -directory $PWD/query_templates -dialect pivotal -scale $GEN_DATA_SCALE -verbose y -output $PWD
+rm -f "$dsqgen_lst"
 
 rm -f $PWD/../05_sql/*.query.*.sql
 

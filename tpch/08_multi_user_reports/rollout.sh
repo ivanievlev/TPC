@@ -38,7 +38,7 @@ done
 
 psql -d $DBNAME -v ON_ERROR_STOP=1 -t -A -c "select 'analyze ' || n.nspname || '.' || c.relname || ';' from pg_class c join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'tpch_testing'" | psql -d $DBNAME -v ON_ERROR_STOP=1 -t -A -e
 
-psql -d $DBNAME -v ON_ERROR_STOP=1 -F $'\t' -A -P pager=off -f $PWD/detailed_report.sql
+psql_report_with_query_labels "$PWD/../00_compile_tpch/dbgen/queries/templates.lst" "$PWD/detailed_report.sql" -P pager=off -P format=aligned -P border=1
 echo ""
 
 end_step $step

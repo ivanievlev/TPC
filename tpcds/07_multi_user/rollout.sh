@@ -98,8 +98,11 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 	#Create queries
 	echo "cd $PWD"
 	cd $PWD
-	echo "$PWD/dsqgen -streams $MULTI_USER_COUNT -input $PWD/query_templates/templates.lst -directory $PWD/query_templates -dialect pivotal -scale $GEN_DATA_SCALE -verbose y -output $PWD"
-	$PWD/dsqgen -streams $MULTI_USER_COUNT -input $PWD/query_templates/templates.lst -directory $PWD/query_templates -dialect pivotal -scale $GEN_DATA_SCALE -verbose y -output $PWD
+	dsqgen_lst=$(mktemp)
+	dsqgen_input_from_templates_lst "$PWD/query_templates/templates.lst" "$dsqgen_lst"
+	echo "$PWD/dsqgen -streams $MULTI_USER_COUNT -input $dsqgen_lst -directory $PWD/query_templates -dialect pivotal -scale $GEN_DATA_SCALE -verbose y -output $PWD"
+	$PWD/dsqgen -streams $MULTI_USER_COUNT -input "$dsqgen_lst" -directory $PWD/query_templates -dialect pivotal -scale $GEN_DATA_SCALE -verbose y -output $PWD
+	rm -f "$dsqgen_lst"
 
 	#move the query_x.sql file to the correct session directory
 	for i in $(ls $PWD/query_*.sql); do
