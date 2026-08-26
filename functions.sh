@@ -1294,22 +1294,24 @@ apply_pgconfig_parameters()
 	echo "APPLY_PGCONFIG_PARAMETERS: applied=$applied skipped=$skipped"
 	pgconfig_restart_postgres
 
-	if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.auto.conf" ]; then
-		cp "$pgdata/postgresql.auto.conf" "$LOCAL_PWD/log/postgresql.auto.conf" 2>/dev/null || true
-	fi
-
 	return 0
 }
 
-# Print postgresql.auto.conf (ALTER SYSTEM overlay) for the 02_init step log.
+# Dump ALTER SYSTEM overlay into log/postgres_test_parameters.txt (readable snapshot).
+# Do not copy PGDATA/postgresql.auto.conf: it is mode 600 and unreadable to other users.
 log_postgres_test_parameters()
 {
-	local db out pgdata
+	local db out pgdata auto_conf
 
 	db="${DBNAME:-postgres}"
 	mkdir -p "$LOCAL_PWD/log"
 	out="$LOCAL_PWD/log/postgres_test_parameters.txt"
+	rm -f "$LOCAL_PWD/log/postgresql.auto.conf" 2>/dev/null || true
 	pgdata=$(psql -d "$db" -v ON_ERROR_STOP=1 -tA -c "SHOW data_directory")
+	auto_conf=""
+	if [ -n "$pgdata" ]; then
+		auto_conf="$pgdata/postgresql.auto.conf"
+	fi
 
 	{
 		echo "############################################################################"
@@ -1317,11 +1319,14 @@ log_postgres_test_parameters()
 		echo "APPLY_PGCONFIG_PARAMETERS=${APPLY_PGCONFIG_PARAMETERS:-false}"
 		echo "PGPORT_WRITE=${PGPORT_WRITE:-5432} PGPORT_SELECT=${PGPORT_SELECT:-5432} PGPORT=${PGPORT:-5432} PGHOST=${PGHOST:-}"
 		echo "############################################################################"
-		if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.auto.conf" ]; then
-			cat "$pgdata/postgresql.auto.conf"
+		if [ -n "$auto_conf" ] && [ -r "$auto_conf" ]; then
+			cat "$auto_conf"
+		else
+			psql -d "$db" -v ON_ERROR_STOP=0 -c "SELECT sourcefile, name, setting FROM pg_file_settings WHERE sourcefile LIKE '%postgresql.auto.conf' ORDER BY name;"
 		fi
 		echo "############################################################################"
 	} | tee "$out"
+	chmod a+r "$out" 2>/dev/null || true
 }
 
 # First-column-only templates.lst for dsqgen (column 2+ is query labels).
