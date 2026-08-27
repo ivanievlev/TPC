@@ -31,11 +31,7 @@ fi
 
 PSQL_SESSION_SETS="SET statement_timeout='$STATEMENT_TIMEOUT';"
 if [ "$RUN_SQL_WITH_DUCKDB" == "true" ]; then
-	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.force_execution TO true;"
-	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.memory_limit TO '$DUCKDB_MEMORY_LIMIT';"
-	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.threads TO $DUCKDB_THREADS;"
-	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.max_workers_per_postgres_scan TO $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN;"
-	PSQL_SESSION_SETS="$PSQL_SESSION_SETS SET duckdb.threads_for_postgres_scan TO $DUCKDB_THREADS_FOR_POSTGRES_SCAN;"
+	append_duckdb_session_sets
 fi
 
 mkdir -p $PWD/../../log/single_explain_analyze_log

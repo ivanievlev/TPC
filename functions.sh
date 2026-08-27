@@ -569,12 +569,26 @@ sql_query_status()
 	echo "succesfull"
 }
 
+# DuckDB instance-level GUCs (memory_limit, threads, …) cannot be SET after
+# DuckDB has been initialized in this backend. PgBouncer/HAProxy reuse backends
+# from earlier queries, so recycle first. force_execution is last (not init-locked).
+append_duckdb_session_sets()
+{
+	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} CALL duckdb.recycle_ddb();"
+	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.memory_limit TO '${DUCKDB_MEMORY_LIMIT}';"
+	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.threads TO ${DUCKDB_THREADS};"
+	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.max_workers_per_postgres_scan TO ${DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN};"
+	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.threads_for_postgres_scan TO ${DUCKDB_THREADS_FOR_POSTGRES_SCAN};"
+	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.force_execution TO true;"
+}
+
 # Run a TPC query file in one psql session and record the backend hostname.
 # A second connection (HAProxy/PgBouncer round-robin) would hit another node,
 # so the probe must share the session with the workload. Hostname is read from
 # the server OS because PgBouncer often uses a unix socket (inet_server_addr
 # is then NULL). Must not CREATE TEMP TABLE: standbys are read-only.
-# DuckDB SET must come after the probe (PSQL_SESSION_SETS).
+# DuckDB SET must come after the probe (PSQL_SESSION_SETS). Recycle is inside
+# those SETs so pooled backends can change memory_limit/threads.
 #
 # $1 SQL file  $2 stdout  $3 stderr  $4 host file  $5 EXPLAIN_ANALYZE value
 # Uses: DBNAME, PSQL_SESSION_SETS, ON_ERROR_STOP, RUN_SQL_FROM_ROLE (optional).
