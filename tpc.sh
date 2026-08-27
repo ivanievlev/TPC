@@ -68,6 +68,14 @@ check_variables()
 		sed -i '/^RUN_MULTI_USER_REPORT=/d' "$MYVAR"
 		new_variable=$(($new_variable + 1))
 	fi
+	if grep -q '^RUN_COMPILE_TPC=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^RUN_COMPILE_TPC=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
+	if grep -q '^RUN_COMPILE_TPCDS=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^RUN_COMPILE_TPCDS=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
 	if grep -q '^RUN_SQL=' "$MYVAR" 2>/dev/null; then
 		if ! grep -q '^RUN_SINGLE_USER=' "$MYVAR" 2>/dev/null; then
 			echo "Renaming RUN_SQL -> RUN_SINGLE_USER in $MYVAR"
@@ -237,21 +245,6 @@ check_variables()
 		new_variable=$(($new_variable + 1))
 	fi
 
-	#00
-	# Migrate legacy RUN_COMPILE_TPCDS → RUN_COMPILE_TPC
-	if grep -q '^RUN_COMPILE_TPCDS=' "$MYVAR" 2>/dev/null; then
-		if ! grep -q '^RUN_COMPILE_TPC=' "$MYVAR" 2>/dev/null; then
-			echo "Renaming RUN_COMPILE_TPCDS -> RUN_COMPILE_TPC in $MYVAR"
-			sed -i 's/^RUN_COMPILE_TPCDS=/RUN_COMPILE_TPC=/' "$MYVAR"
-		else
-			sed -i '/^RUN_COMPILE_TPCDS=/d' "$MYVAR"
-		fi
-	fi
-	local count=$(grep "RUN_COMPILE_TPC" $MYVAR | wc -l)
-	if [ "$count" -eq "0" ]; then
-		echo "RUN_COMPILE_TPC=\"true\"" >> $MYVAR
-		new_variable=$(($new_variable + 1))
-	fi
 	#01
 	local count=$(grep "RUN_GEN_DATA" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
@@ -769,7 +762,6 @@ echo_variables()
 	echo "TPC_MODE: $TPC_MODE"
 	echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
 	echo "EXPLAIN_ANALYZE: $EXPLAIN_ANALYZE"
-	echo "RUN_COMPILE_TPC: $RUN_COMPILE_TPC"
 	echo "RUN_GEN_DATA: $RUN_GEN_DATA"
 	echo "RUN_INIT: $RUN_INIT"
 	echo "RUN_DDL: $RUN_DDL"

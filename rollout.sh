@@ -20,7 +20,7 @@ else
 	unset PGHOST
 fi
 
-if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_COMPILE_TPC" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SINGLE_USER" == "" || "$RUN_MULTI_USER" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
+if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SINGLE_USER" == "" || "$RUN_MULTI_USER" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
 	echo "Please run this script from tpc.sh so tpc_variables.sh is complete."
 	exit 1
 fi
@@ -118,7 +118,6 @@ echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
 echo "EXPLAIN_ANALYZE: $EXPLAIN_ANALYZE  (05_sql only)"
 echo "RANDOM_DISTRIBUTION: $RANDOM_DISTRIBUTION"
 echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
-echo "RUN_COMPILE_TPC: $RUN_COMPILE_TPC  (compile step for current TPC_MODE)"
 echo "RUN_GEN_DATA: $RUN_GEN_DATA"
 echo "RUN_INIT: $RUN_INIT"
 echo "RUN_DDL: $RUN_DDL"
@@ -152,11 +151,9 @@ echo "RUN_SQL_WITH_DUCKDB: $RUN_SQL_WITH_DUCKDB"
 echo "############################################################################"
 echo ""
 
-# RUN_COMPILE_TPC gates the compile step for either mode (00_compile_tpcds / 00_compile_tpch).
-if [ "$RUN_COMPILE_TPC" == "true" ]; then
-	rm -f $PWD/log/end_compile_tpcds.log
-	rm -f $PWD/log/end_compile_tpch.log
-fi
+# Compile (00_compile_tpcds / 00_compile_tpch) always runs so dsdgen/qgen stay present.
+rm -f $PWD/log/end_compile_tpcds.log
+rm -f $PWD/log/end_compile_tpch.log
 if [ "$RUN_GEN_DATA" == "true" ]; then
 	rm -f $PWD/log/end_gen_data.log
 fi
@@ -188,7 +185,7 @@ step_run_flag()
 	local base
 	base=$(basename "$1")
 	case "$base" in
-		00_compile_tpcds|00_compile_tpch) echo "$RUN_COMPILE_TPC" ;;
+		00_compile_tpcds|00_compile_tpch) echo "true" ;;
 		01_gen_data) echo "$RUN_GEN_DATA" ;;
 		02_init) echo "$RUN_INIT" ;;
 		03_ddl) echo "$RUN_DDL" ;;

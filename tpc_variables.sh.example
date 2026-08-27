@@ -32,7 +32,6 @@ COLLECT_DATA_PERIOD="5s"  # Sampling interval for the OS metrics collector.
 ##############################################################################
 # Steps
 ##############################################################################
-RUN_COMPILE_TPC="true"  # Build dsdgen/dsqgen or dbgen/qgen and copy query templates.
 RUN_GEN_DATA="true"  # Generate flat .dat / .tbl files at GEN_DATA_SCALE.
 RUN_INIT="true"  # Create the database and apply cluster init settings.
 RUN_DDL="true"  # Create schemas, tables or external views.
