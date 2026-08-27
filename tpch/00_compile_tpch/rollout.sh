@@ -17,7 +17,7 @@ make_tpc()
 	#compile dbgen
 	cd $PWD/dbgen
 	rm -f *.o
-	make
+	make -s
 	cd ..
 }
 copy_queries()

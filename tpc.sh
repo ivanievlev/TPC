@@ -76,6 +76,10 @@ check_variables()
 		sed -i '/^RUN_COMPILE_TPCDS=/d' "$MYVAR"
 		new_variable=$(($new_variable + 1))
 	fi
+	if grep -q '^RUN_SCORE=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^RUN_SCORE=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
 	if grep -q '^RUN_SQL=' "$MYVAR" 2>/dev/null; then
 		if ! grep -q '^RUN_SINGLE_USER=' "$MYVAR" 2>/dev/null; then
 			echo "Renaming RUN_SQL -> RUN_SINGLE_USER in $MYVAR"
@@ -279,12 +283,6 @@ check_variables()
 	local count=$(grep '^RUN_MULTI_USER=' $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
 		echo "RUN_MULTI_USER=\"true\"" >> $MYVAR
-		new_variable=$(($new_variable + 1))
-	fi
-	#09
-	local count=$(grep '^RUN_SCORE=' $MYVAR | wc -l)
-	if [ "$count" -eq "0" ]; then
-		echo "RUN_SCORE=\"true\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 
@@ -768,7 +766,6 @@ echo_variables()
 	echo "RUN_LOAD: $RUN_LOAD"
 	echo "RUN_SINGLE_USER: $RUN_SINGLE_USER"
 	echo "RUN_MULTI_USER: $RUN_MULTI_USER"
-	echo "RUN_SCORE: $RUN_SCORE"
 	echo "ADMIN_USER: $ADMIN_USER"
 	echo "DBNAME: $DBNAME"
 	echo "PGPORT_WRITE: $PGPORT_WRITE"

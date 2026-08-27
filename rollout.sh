@@ -20,7 +20,7 @@ else
 	unset PGHOST
 fi
 
-if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SINGLE_USER" == "" || "$RUN_MULTI_USER" == "" || "$RUN_SCORE" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
+if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SINGLE_USER" == "" || "$RUN_MULTI_USER" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
 	echo "Please run this script from tpc.sh so tpc_variables.sh is complete."
 	exit 1
 fi
@@ -125,7 +125,6 @@ echo "RUN_LOAD: $RUN_LOAD"
 echo "RUN_SINGLE_USER: $RUN_SINGLE_USER"
 echo "SINGLE_USER_ITERATIONS: $SINGLE_USER_ITERATIONS"
 echo "RUN_MULTI_USER: $RUN_MULTI_USER"
-echo "RUN_SCORE: $RUN_SCORE"
 echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"
 echo "EXCLUDE_HEAVY_QUERIES: $EXCLUDE_HEAVY_QUERIES"
 echo "SKIP_TPCDS_QUERIES_LIST: $SKIP_TPCDS_QUERIES_LIST"
@@ -176,9 +175,7 @@ if [ "$RUN_MULTI_USER" == "true" ]; then
 fi
 
 export RUN_MULTI_USER APPLY_PGCONFIG_PARAMETERS
-if [ "$RUN_SCORE" == "true" ]; then
-	rm -f $PWD/log/end_score.log
-fi
+rm -f $PWD/log/end_score.log
 
 step_run_flag()
 {
@@ -194,7 +191,7 @@ step_run_flag()
 		06_single_user_reports) echo "$RUN_SINGLE_USER" ;;
 		07_multi_user) echo "$RUN_MULTI_USER" ;;
 		08_multi_user_reports) echo "$RUN_MULTI_USER" ;;
-		09_score) echo "$RUN_SCORE" ;;
+		09_score) echo "true" ;;
 		*) echo "true" ;;
 	esac
 }

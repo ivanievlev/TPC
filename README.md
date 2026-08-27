@@ -86,11 +86,10 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 - RUN_LOAD="false"
 - RUN_SINGLE_USER="true"
 - RUN_MULTI_USER="true"
-- RUN_SCORE="true"
 
 	``Each RUN_*=false skips that step entirely in rollout.sh (the step script is not called).
 	RUN_*=true removes the step's end_*.log and runs it.
-	Compile (00_compile_tpcds / 00_compile_tpch) always runs; there is no RUN_COMPILE_TPC flag.
+	Compile (00_compile_tpcds / 00_compile_tpch) and score (09_score) always run; there are no RUN_COMPILE_TPC or RUN_SCORE flags.
 	RUN_SINGLE_USER=true always runs 05_sql and then 06_single_user_reports.
 	RUN_MULTI_USER=true always runs 07_multi_user and then 08_multi_user_reports.
 	There are no separate report flags.``

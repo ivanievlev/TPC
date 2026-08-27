@@ -17,7 +17,7 @@ make_tpc()
 	#compile the tools
 	cd $PWD/tools
 	rm -f *.o
-	make
+	make -s
 	cd ..
 }
 

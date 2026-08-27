@@ -38,7 +38,6 @@ RUN_DDL="true"  # Create schemas, tables or external views.
 RUN_LOAD="true"  # Load heap tables or convert .dat files to parquet/csv/json.
 RUN_SINGLE_USER="true"  # Run the single-user query stream (05_sql) and its report (06).
 RUN_MULTI_USER="true"  # Run concurrent streams (07_multi_user) and the multi-user report (08).
-RUN_SCORE="true"  # Print the SCORE summary (09_score).
 
 ##############################################################################
 # Postgres-specific
