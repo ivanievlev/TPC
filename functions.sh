@@ -574,11 +574,6 @@ sql_query_status()
 # from earlier queries, so recycle first. force_execution is last (not init-locked).
 append_duckdb_session_sets()
 {
-	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} CALL duckdb.recycle_ddb();"
-	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.memory_limit TO '${DUCKDB_MEMORY_LIMIT}';"
-	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.threads TO ${DUCKDB_THREADS};"
-	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.max_workers_per_postgres_scan TO ${DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN};"
-	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.threads_for_postgres_scan TO ${DUCKDB_THREADS_FOR_POSTGRES_SCAN};"
 	PSQL_SESSION_SETS="${PSQL_SESSION_SETS} SET duckdb.force_execution TO true;"
 }
 
@@ -587,8 +582,8 @@ append_duckdb_session_sets()
 # so the probe must share the session with the workload. Hostname is read from
 # the server OS because PgBouncer often uses a unix socket (inet_server_addr
 # is then NULL). Must not CREATE TEMP TABLE: standbys are read-only.
-# DuckDB SET must come after the probe (PSQL_SESSION_SETS). Recycle is inside
-# those SETs so pooled backends can change memory_limit/threads.
+# DuckDB SET must come after the probe (PSQL_SESSION_SETS). Only force_execution
+# is per-session; memory/threads are ALTER DATABASE in 02_init.
 #
 # $1 SQL file  $2 stdout  $3 stderr  $4 host file  $5 EXPLAIN_ANALYZE value
 # Uses: DBNAME, PSQL_SESSION_SETS, ON_ERROR_STOP, RUN_SQL_FROM_ROLE (optional).
@@ -1188,22 +1183,60 @@ pgconfig_restart_postgres()
 	psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT 1" >/dev/null
 }
 
+# Instance-level pg_duckdb GUCs (memory/threads). Set once on DBNAME so every
+# new session (primary and replicas) inherits them before DuckDB starts.
+# ALTER DATABASE replicates via WAL; ALTER SYSTEM would stay on the primary.
+apply_duckdb_database_gucs()
+{
+	local db guc val line
+
+	if [ "${RUN_SQL_WITH_DUCKDB:-false}" != "true" ]; then
+		return 0
+	fi
+	db="${DBNAME:-}"
+	if [ -z "$db" ]; then
+		echo "APPLY_DUCKDB_GUC: skip (DBNAME is empty)"
+		return 0
+	fi
+
+	echo "############################################################################"
+	echo "APPLY_DUCKDB_GUC: ALTER DATABASE $db SET duckdb.* from tpc_variables.sh"
+	echo "############################################################################"
+	while IFS='|' read -r guc val; do
+		[ -z "$guc" ] && continue
+		line="ALTER DATABASE $db SET $guc TO '$val'"
+		echo "APPLY_DUCKDB_GUC: $line"
+		if ! psql -d "$db" -v ON_ERROR_STOP=1 -c "$line"; then
+			echo "ERROR: failed to $line (is pg_duckdb installed in $db?)"
+			return 1
+		fi
+	done <<EOF
+duckdb.memory_limit|${DUCKDB_MEMORY_LIMIT:-4GB}
+duckdb.threads|${DUCKDB_THREADS:--1}
+duckdb.max_workers_per_postgres_scan|${DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN:-2}
+duckdb.threads_for_postgres_scan|${DUCKDB_THREADS_FOR_POSTGRES_SCAN:-2}
+EOF
+	return 0
+}
+
 # When APPLY_PGCONFIG_PARAMETERS=true, fetch recommended GUCs from
 # https://api.pgconfig.org for this host's CPU/RAM/disk and apply them
 # with ALTER SYSTEM + PostgreSQL restart. PostgreSQL only.
-# When false, leave the current parameters unchanged.
+# DuckDB instance GUCs are applied here as well (ALTER DATABASE, no extra restart).
+# When false, leave postgresql.conf unchanged but still apply DuckDB database GUCs.
 apply_pgconfig_parameters()
 {
-	if [ "${APPLY_PGCONFIG_PARAMETERS:-false}" != "true" ]; then
-		echo "APPLY_PGCONFIG_PARAMETERS=false: leaving current PostgreSQL parameters unchanged"
-		return 0
-	fi
+	local need_restart=0
 
 	get_version
 	if [[ "$VERSION" == *"gpdb"* ]]; then
 		echo "APPLY_PGCONFIG_PARAMETERS: skipped (Greenplum is not supported by pgconfig)"
 		return 0
 	fi
+
+	if [ "${APPLY_PGCONFIG_PARAMETERS:-false}" != "true" ]; then
+		echo "APPLY_PGCONFIG_PARAMETERS=false: leaving current PostgreSQL parameters unchanged"
+	else
 
 	if ! psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT 1" >/dev/null 2>&1; then
 		echo "ERROR: APPLY_PGCONFIG_PARAMETERS=true requires a running PostgreSQL instance"
@@ -1324,7 +1357,14 @@ apply_pgconfig_parameters()
 	done < "$sql_file"
 
 	echo "APPLY_PGCONFIG_PARAMETERS: applied=$applied skipped=$skipped"
-	pgconfig_restart_postgres
+		need_restart=1
+	fi
+
+	apply_duckdb_database_gucs || return 1
+
+	if [ "$need_restart" -eq 1 ]; then
+		pgconfig_restart_postgres
+	fi
 
 	return 0
 }
@@ -1349,6 +1389,7 @@ log_postgres_test_parameters()
 		echo "############################################################################"
 		echo "PostgreSQL parameters for this test run"
 		echo "APPLY_PGCONFIG_PARAMETERS=${APPLY_PGCONFIG_PARAMETERS:-false}"
+		echo "RUN_SQL_WITH_DUCKDB=${RUN_SQL_WITH_DUCKDB:-false}"
 		echo "PGPORT_WRITE=${PGPORT_WRITE:-5432} PGPORT_SELECT=${PGPORT_SELECT:-5432} PGPORT=${PGPORT:-5432} PGHOST=${PGHOST:-}"
 		echo "############################################################################"
 		if [ -n "$auto_conf" ] && [ -r "$auto_conf" ]; then
@@ -1357,6 +1398,11 @@ log_postgres_test_parameters()
 			psql -d "$db" -v ON_ERROR_STOP=0 -c "SELECT sourcefile, name, setting FROM pg_file_settings WHERE sourcefile LIKE '%postgresql.auto.conf' ORDER BY name;"
 		fi
 		echo "############################################################################"
+		if [ "${RUN_SQL_WITH_DUCKDB:-false}" = "true" ]; then
+			echo "DuckDB database GUCs (SHOW):"
+			psql -d "$db" -v ON_ERROR_STOP=0 -c "SELECT name, setting FROM pg_settings WHERE name LIKE 'duckdb.%' ORDER BY name;"
+			echo "############################################################################"
+		fi
 	} | tee "$out"
 	chmod a+r "$out" 2>/dev/null || true
 }

@@ -255,8 +255,9 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 - RUN_SQL_WITH_DUCKDB="false"
 
 	``PostgreSQL/pg_duckdb only. Default "false": steps 05 and 07 run as usual on Postgres.
-	If "true", those steps set duckdb.force_execution TO true for each query session, plus duckdb.memory_limit / duckdb.threads /
-	duckdb.max_workers_per_postgres_scan / duckdb.threads_for_postgres_scan from the corresponding DUCKDB_* variables.
+	If "true", those steps set duckdb.force_execution TO true for each query session.
+	duckdb.memory_limit / duckdb.threads / duckdb.max_workers_per_postgres_scan / duckdb.threads_for_postgres_scan
+	are applied once in 02_init (ALTER DATABASE DBNAME SET …) together with pgconfig, not per query.
 	With USE_EXTERNAL_FORMAT="false" DuckDB reads heap tables;
 	with parquet/csv/json DuckDB reads the corresponding views.
 	Validation: USE_EXTERNAL_FORMAT in {parquet,csv,json} requires RUN_SQL_WITH_DUCKDB="true", otherwise the run fails with:
@@ -278,22 +279,22 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 
 - DUCKDB_MEMORY_LIMIT="4GB"
 
-	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.memory_limit for each query session in steps 05 and 07.
-	Default "4GB". Raise this (e.g. "16GB") if queries hit DuckDB Out of Memory errors.``
+	``Used when RUN_SQL_WITH_DUCKDB="true". Applied once in 02_init via ALTER DATABASE SET duckdb.memory_limit
+	(replicates to standbys). Default "4GB". Raise this (e.g. "16GB") if queries hit DuckDB Out of Memory errors.``
 
 - DUCKDB_THREADS="-1"
 
-	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.threads for each query session in steps 05 and 07.
+	``Used when RUN_SQL_WITH_DUCKDB="true". Applied once in 02_init via ALTER DATABASE SET duckdb.threads.
 	Default "-1" (DuckDB chooses).``
 
 - DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"
 
-	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.max_workers_per_postgres_scan for each query session in steps 05 and 07.
+	``Used when RUN_SQL_WITH_DUCKDB="true". Applied once in 02_init via ALTER DATABASE SET duckdb.max_workers_per_postgres_scan.
 	Default "2" (pg_duckdb boot default).``
 
 - DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"
 
-	``Used when RUN_SQL_WITH_DUCKDB="true". Sets duckdb.threads_for_postgres_scan for each query session in steps 05 and 07.
+	``Used when RUN_SQL_WITH_DUCKDB="true". Applied once in 02_init via ALTER DATABASE SET duckdb.threads_for_postgres_scan.
 	Default "2" (pg_duckdb boot default).``
 
 ## Parameters that are set during 02_init phase: Resource Groups limits (only for admin_group) and network sysctl parameters 

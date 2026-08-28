@@ -43,10 +43,10 @@ RUN_MULTI_USER="true"  # Run concurrent streams (07_multi_user) and the multi-us
 # Postgres-specific
 ##############################################################################
 RUN_SQL_WITH_DUCKDB="false"  # Force pg_duckdb execution for 05_sql and 07_multi_user sessions.
-DUCKDB_MEMORY_LIMIT="4GB"  # duckdb.memory_limit for each query session.
-DUCKDB_THREADS="-1"  # duckdb.threads (-1 lets DuckDB choose).
-DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"  # duckdb.max_workers_per_postgres_scan per session.
-DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"  # duckdb.threads_for_postgres_scan per session.
+DUCKDB_MEMORY_LIMIT="4GB"  # duckdb.memory_limit; applied once in 02_init (ALTER DATABASE).
+DUCKDB_THREADS="-1"  # duckdb.threads (-1 lets DuckDB choose); applied once in 02_init.
+DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN="2"  # duckdb.max_workers_per_postgres_scan; applied once in 02_init.
+DUCKDB_THREADS_FOR_POSTGRES_SCAN="2"  # duckdb.threads_for_postgres_scan; applied once in 02_init.
 USE_EXTERNAL_FORMAT="false"  # false=heap tables; parquet/csv/json=views over local files.
 EXTERNAL_HIVE_PARTITIONING="false"  # Write and read external files as year=/month= hive directories.
 EXTERNAL_FILE_SIZE_BYTES="-1"  # DuckDB FILE_SIZE_BYTES for COPY; -1 writes a single file.
