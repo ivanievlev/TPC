@@ -26,7 +26,7 @@ SQL_ON_ERROR_STOP="false"  # Stop 05_sql / 07_multi_user on the first query ERRO
 STATEMENT_TIMEOUT="1h"  # PostgreSQL statement_timeout for 05_sql and 07_multi_user sessions.
 MAKE_PREREQUISITES="false"  # When true, apply jumbo frames and start a stopped Greenplum cluster.
 KILL_PREVIOUS_PROCESSES="true"  # Kill leftover TPC processes and backends from a previous unfinished run.
-COLLECT_OS_DATA="true"  # Sample local CPU/RAM/network/disk metrics for the score report.
+COLLECT_OS_DATA="true"  # Sample CPU/RAM/network/disk on this host and, if Patroni is present, every cluster member.
 COLLECT_DATA_PERIOD="5s"  # Sampling interval for the OS metrics collector.
 
 ##############################################################################

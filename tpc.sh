@@ -24,6 +24,8 @@ as_admin()
 	local port_select="${PGPORT_SELECT:-5432}"
 	local port="${PGPORT:-$port_write}"
 	local envcmd="export PGPORT_WRITE=\"${port_write}\" PGPORT_SELECT=\"${port_select}\" PGPORT=\"${port}\"; unset PGHOST;"
+	# Invoker can SSH to Patroni replicas; ADMIN_USER (postgres) often cannot.
+	envcmd="${envcmd} export TPC_SSH_USER=\"${TPC_SSH_USER:-$(id -un)}\";"
 	if [ -n "${PGHOST:-}" ]; then
 		envcmd="${envcmd} export PGHOST=\"${PGHOST}\";"
 	fi

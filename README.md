@@ -11,7 +11,7 @@ TPC_MODE="TPC-H"    # tpch/00_compile_tpch … tpch/09_score
 
 Knobs live in `tpc_variables.sh`, grouped as Generic, Steps, Postgres-specific, Greenplum-specific, TPCDS-specific, and TPCH-specific. Each variable has a one-sentence comment. Copy `tpc_variables.sh.example` for a starting template. Entry point: `./tpc.sh`.
 
-TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score reports 05_sql (`1 User Queries`, TPT, Score, success %) **per `SINGLE_USER_ITERATIONS` pass**, plus DAT/TBL size, DB or external storage size, 07 success rate, and (when `COLLECT_OS_DATA=true`) local OS CPU/RAM/network/disk averages for those steps.
+TPC-H assets live under `tpch/`. Score (`09_score`) and `USE_EXTERNAL_FORMAT` (parquet/csv/json) are available for both TPC-DS and TPC-H. Score reports 05_sql (`1 User Queries`, TPT, Score, success %) **per `SINGLE_USER_ITERATIONS` pass**, plus DAT/TBL size, DB or external storage size, 07 success rate, and (when `COLLECT_OS_DATA=true`) OS CPU/RAM/network/disk averages per host for those steps (every Patroni member when the cluster is present).
 
 ---
 
@@ -265,8 +265,9 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 
 - COLLECT_OS_DATA="true"
 
-	``Default "true": starts a local OS metrics collector for the duration of the run (no Prometheus / exporters required).
-	Samples CPU, RAM, network, and disk into log/os_metrics.csv. Step 09_score averages those samples over the
+	``Default "true": starts an OS metrics collector for the duration of the run (no Prometheus / exporters required).
+	Samples CPU, RAM, network, and disk into log/os_metrics/<host>.csv. On a Patroni cluster every member is sampled
+	(SSH as the tpc.sh invoker); otherwise only the local host. Step 09_score prints per-host averages over the
 	05_sql and 07_multi_user time windows. Set to "false" to skip collection and omit OS metric rows from the score.``
 
 - COLLECT_DATA_PERIOD="5s"

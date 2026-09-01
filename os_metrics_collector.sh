@@ -1,6 +1,7 @@
 #!/bin/bash
 # Background OS sampler for TPC score metrics (CPU / RAM / network / disk).
 # Usage: os_metrics_collector.sh <outfile> <period_seconds>
+# One process per host; SCORE reads log/os_metrics/<hostname>.csv.
 # CSV columns (space-separated):
 #   ts_unix cpu_idle cpu_total mem_used_bytes net_rx_bytes net_tx_bytes disk_used_bytes
 #

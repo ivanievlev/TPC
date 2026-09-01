@@ -339,7 +339,7 @@ parse_duration_to_seconds()
 	return 0
 }
 
-os_metrics_log_path()
+_os_metrics_repo_root()
 {
 	local root="${LOCAL_PWD:-}"
 	if [ -z "$root" ]; then
@@ -349,54 +349,270 @@ os_metrics_log_path()
 			root="$PWD/../.."
 		fi
 	fi
-	echo "$root/log/os_metrics.csv"
+	printf '%s\n' "$root"
+}
+
+os_metrics_log_path()
+{
+	# Legacy single-file path (pre-per-host). SCORE prefers log/os_metrics/<host>.csv.
+	echo "$(_os_metrics_repo_root)/log/os_metrics.csv"
+}
+
+os_metrics_dir()
+{
+	echo "$(_os_metrics_repo_root)/log/os_metrics"
 }
 
 os_metrics_pid_path()
 {
-	local root="${LOCAL_PWD:-}"
-	if [ -z "$root" ]; then
-		if [ -d "$PWD/log" ]; then
-			root="$PWD"
-		else
-			root="$PWD/../.."
+	echo "$(_os_metrics_repo_root)/log/os_metrics_collector.pid"
+}
+
+os_metrics_ssh_user()
+{
+	if [ -n "${TPC_SSH_USER:-}" ]; then
+		printf '%s\n' "$TPC_SSH_USER"
+		return
+	fi
+	if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "$(id -un)" ]; then
+		printf '%s\n' "$SUDO_USER"
+		return
+	fi
+	id -un
+}
+
+# Run a command as the tpc.sh invoker (keys + SSH to Patroni replicas).
+os_metrics_as_ssh_user()
+{
+	local u
+	u=$(os_metrics_ssh_user)
+	if [ "$(id -un)" = "$u" ]; then
+		"$@"
+	else
+		sudo -n -u "$u" -H -- "$@"
+	fi
+}
+
+_os_metrics_ssh_opts()
+{
+	printf '%s\n' "${SSH_BATCH_OPTS:--o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes}"
+}
+
+_os_metrics_patroni_yaml_path()
+{
+	local line token
+	line=$(ps aux | grep patroni | grep -v grep | grep -v patronictl | awk '
+		{ print; exit }
+	')
+	[ -n "$line" ] || return 1
+	for token in $line; do
+		case "$token" in
+			*.yml|*.yaml)
+				printf '%s\n' "$token"
+				return 0
+				;;
+		esac
+	done
+	return 1
+}
+
+# Lines of "short|ssh_host" for Patroni members. Empty if not a Patroni cluster.
+_os_metrics_patroni_members()
+{
+	local yaml ctl json user
+	yaml=$(_os_metrics_patroni_yaml_path || true)
+	[ -n "$yaml" ] || return 1
+	ctl=$(command -v patronictl 2>/dev/null || true)
+	if [ -z "$ctl" ]; then
+		return 1
+	fi
+	json=""
+	if [ -r "$yaml" ]; then
+		json=$("$ctl" -c "$yaml" list --format json 2>/dev/null || true)
+	else
+		user="${ADMIN_USER:-postgres}"
+		json=$(sudo -n -u "$user" -H "$ctl" -c "$yaml" list --format json 2>/dev/null || true)
+		if [ -z "$json" ]; then
+			json=$(sudo -n -u "$user" -H bash -lc "patronictl -c '$yaml' list --format json" 2>/dev/null || true)
 		fi
 	fi
-	echo "$root/log/os_metrics_collector.pid"
+	[ -n "$json" ] || return 1
+	python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(1)
+data = json.loads(raw)
+if isinstance(data, dict):
+    data = data.get("members") or data.get("Members") or []
+if not isinstance(data, list):
+    sys.exit(1)
+seen = set()
+for m in data:
+    if not isinstance(m, dict):
+        continue
+    member = str(m.get("Member") or m.get("member") or m.get("Name") or "").strip()
+    host = str(m.get("Host") or m.get("host") or "").strip()
+    ident = member or host
+    if not ident:
+        continue
+    short = ident.split(".")[0]
+    ssh = member if member else host
+    if not ssh:
+        ssh = host or ident
+    if short in seen:
+        continue
+    seen.add(short)
+    print("%s|%s" % (short, ssh))
+' <<<"$json"
+}
+
+# short|ssh_host for every host we will sample (Patroni members, else this machine).
+os_metrics_sample_targets()
+{
+	local members
+	members=$(_os_metrics_patroni_members || true)
+	if [ -n "$members" ]; then
+		printf '%s\n' "$members"
+		return 0
+	fi
+	printf '%s|%s\n' "$(hostname -s)" "$(hostname -f 2>/dev/null || hostname -s)"
+}
+
+_os_metrics_is_local()
+{
+	local host="$1"
+	if type is_local_host >/dev/null 2>&1; then
+		is_local_host "$host"
+		return $?
+	fi
+	local short local_s
+	short=$(printf '%s' "$host" | awk -F. '{print $1}')
+	local_s=$(hostname -s 2>/dev/null || true)
+	[ "$host" = "$local_s" ] || [ "$short" = "$local_s" ]
+}
+
+_os_metrics_kill_pid()
+{
+	local pid="$1"
+	[ -n "$pid" ] || return 0
+	if kill -0 "$pid" 2>/dev/null; then
+		kill "$pid" 2>/dev/null || true
+		sleep 0.2 2>/dev/null || true
+		kill -9 "$pid" 2>/dev/null || true
+	fi
+}
+
+# Copy remote /tmp samples into log/os_metrics/<short>.csv (collectors may still be running).
+os_metrics_fetch_remote_logs()
+{
+	local dir mapfile short ssh_host pid opts
+	dir=$(os_metrics_dir)
+	mapfile="$dir/remote.pids"
+	[ -f "$mapfile" ] || return 0
+	opts=$(_os_metrics_ssh_opts)
+	while IFS='|' read -r short ssh_host pid; do
+		[ -n "$short" ] && [ -n "$ssh_host" ] || continue
+		os_metrics_as_ssh_user scp $opts "${ssh_host}:/tmp/tpc_os_metrics.csv" "$dir/${short}.csv" 2>/dev/null || true
+	done < "$mapfile"
 }
 
 stop_os_metrics_collector()
 {
-	local pidfile pid
+	local dir pidfile pid mapfile short ssh_host rpid opts
+
+	dir=$(os_metrics_dir)
+	opts=$(_os_metrics_ssh_opts)
+	mapfile="$dir/remote.pids"
+	if [ -f "$mapfile" ]; then
+		while IFS='|' read -r short ssh_host rpid; do
+			[ -n "$ssh_host" ] || continue
+			if [ -n "$rpid" ]; then
+				os_metrics_as_ssh_user ssh -n $opts "$ssh_host" "kill $rpid 2>/dev/null; sleep 0.2; kill -9 $rpid 2>/dev/null; true" 2>/dev/null || true
+			fi
+			os_metrics_as_ssh_user ssh -n $opts "$ssh_host" "pkill -f /tmp/tpc_os_metrics_collector.sh 2>/dev/null; true" 2>/dev/null || true
+			os_metrics_as_ssh_user scp $opts "${ssh_host}:/tmp/tpc_os_metrics.csv" "$dir/${short}.csv" 2>/dev/null || true
+		done < "$mapfile"
+		rm -f "$mapfile"
+	fi
+
 	pidfile=$(os_metrics_pid_path)
 	if [ -f "$pidfile" ]; then
 		pid=$(tr -d '[:space:]' < "$pidfile")
-		if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-			kill "$pid" 2>/dev/null || true
-			# Give it a moment; then force
-			sleep 0.2 2>/dev/null || true
-			kill -9 "$pid" 2>/dev/null || true
-		fi
+		_os_metrics_kill_pid "$pid"
 		rm -f "$pidfile"
 	fi
-	# Best-effort: any leftover collector writing our outfile
+	if [ -d "$dir" ]; then
+		for pidfile in "$dir"/*.pid; do
+			[ -f "$pidfile" ] || continue
+			pid=$(tr -d '[:space:]' < "$pidfile")
+			_os_metrics_kill_pid "$pid"
+			rm -f "$pidfile"
+		done
+	fi
+	pkill -f "os_metrics_collector.sh $(_os_metrics_repo_root)/log/os_metrics" 2>/dev/null || true
 	pkill -f "os_metrics_collector.sh $(os_metrics_log_path)" 2>/dev/null || true
+}
+
+_os_metrics_start_local()
+{
+	local short="$1"
+	local collector="$2"
+	local period_sec="$3"
+	local dir outfile pidfile
+	dir=$(os_metrics_dir)
+	outfile="$dir/${short}.csv"
+	pidfile="$dir/${short}.pid"
+	nohup "$collector" "$outfile" "$period_sec" >/dev/null 2>&1 &
+	echo $! > "$pidfile"
+	sleep 0.3 2>/dev/null || sleep 1
+	if ! kill -0 "$(tr -d '[:space:]' < "$pidfile")" 2>/dev/null; then
+		echo "ERROR: OS metrics collector failed to start on local host $short."
+		return 1
+	fi
+	echo "OS metrics collector on $short (local) PID $(tr -d '[:space:]' < "$pidfile")"
+	return 0
+}
+
+_os_metrics_start_remote()
+{
+	local short="$1"
+	local ssh_host="$2"
+	local collector="$3"
+	local period_sec="$4"
+	local dir opts rpid
+	dir=$(os_metrics_dir)
+	opts=$(_os_metrics_ssh_opts)
+
+	if ! os_metrics_as_ssh_user ssh -n $opts "$ssh_host" "true" >/dev/null 2>&1; then
+		echo "ERROR: COLLECT_OS_DATA cannot SSH to Patroni member $ssh_host as $(os_metrics_ssh_user) (BatchMode)."
+		return 1
+	fi
+	os_metrics_as_ssh_user scp $opts "$collector" "${ssh_host}:/tmp/tpc_os_metrics_collector.sh" || {
+		echo "ERROR: COLLECT_OS_DATA cannot scp collector to $ssh_host."
+		return 1
+	}
+	os_metrics_as_ssh_user ssh -n $opts "$ssh_host" "pkill -f /tmp/tpc_os_metrics_collector.sh 2>/dev/null || true; chmod +x /tmp/tpc_os_metrics_collector.sh" || true
+	rpid=$(os_metrics_as_ssh_user ssh -n $opts "$ssh_host" "nohup /tmp/tpc_os_metrics_collector.sh /tmp/tpc_os_metrics.csv $period_sec >/dev/null 2>&1 & echo \$!")
+	rpid=$(printf '%s' "$rpid" | tr -d '[:space:]')
+	if [ -z "$rpid" ]; then
+		echo "ERROR: OS metrics collector failed to start on $ssh_host ($short)."
+		return 1
+	fi
+	echo "${short}|${ssh_host}|${rpid}" >> "$dir/remote.pids"
+	echo "OS metrics collector on $short ($ssh_host) PID $rpid"
+	return 0
 }
 
 start_os_metrics_collector()
 {
 	local period_raw="${COLLECT_DATA_PERIOD:-5s}"
-	local period_sec outfile pidfile script_dir collector
+	local period_sec script_dir collector dir hosts_file line short ssh_host
 	period_sec=$(parse_duration_to_seconds "$period_raw") || true
 	if [ -z "$period_sec" ]; then
 		echo "ERROR: COLLECT_OS_DATA=true but COLLECT_DATA_PERIOD='$period_raw' is not a valid duration (e.g. 5s, 1min, 1m, 2h)."
 		return 1
 	fi
-	outfile=$(os_metrics_log_path)
-	pidfile=$(os_metrics_pid_path)
-	mkdir -p "$(dirname "$outfile")"
-
-	stop_os_metrics_collector
 
 	script_dir="${LOCAL_PWD:-$PWD}"
 	collector="$script_dir/os_metrics_collector.sh"
@@ -408,28 +624,52 @@ start_os_metrics_collector()
 		return 1
 	fi
 
-	echo "Starting OS metrics collector (period=${period_raw} → ${period_sec}s) → $outfile"
-	nohup "$collector" "$outfile" "$period_sec" >/dev/null 2>&1 &
-	echo $! > "$pidfile"
-	# Confirm it stayed up
-	sleep 0.3 2>/dev/null || sleep 1
-	if ! kill -0 "$(tr -d '[:space:]' < "$pidfile")" 2>/dev/null; then
-		echo "ERROR: OS metrics collector failed to start."
-		rm -f "$pidfile"
+	stop_os_metrics_collector
+
+	dir=$(os_metrics_dir)
+	mkdir -p "$dir"
+	rm -f "$(os_metrics_pid_path)"
+	rm -f "$dir"/*.csv "$dir"/*.pid
+	: > "$dir/remote.pids"
+	hosts_file="$dir/hosts"
+	: > "$hosts_file"
+
+	echo "Starting OS metrics collector (period=${period_raw} → ${period_sec}s)"
+	while IFS='|' read -r short ssh_host; do
+		[ -n "$short" ] || continue
+		[ -n "$ssh_host" ] || ssh_host=$short
+		printf '%s\n' "$short" >> "$hosts_file"
+		if _os_metrics_is_local "$ssh_host" || _os_metrics_is_local "$short"; then
+			_os_metrics_start_local "$short" "$collector" "$period_sec" || {
+				stop_os_metrics_collector
+				return 1
+			}
+		else
+			_os_metrics_start_remote "$short" "$ssh_host" "$collector" "$period_sec" || {
+				stop_os_metrics_collector
+				return 1
+			}
+		fi
+	done < <(os_metrics_sample_targets)
+
+	if [ ! -s "$hosts_file" ]; then
+		echo "ERROR: OS metrics collector has no hosts to sample."
 		return 1
 	fi
-	echo "OS metrics collector PID $(tr -d '[:space:]' < "$pidfile")"
+	echo "OS metrics hosts: $(tr '\n' ' ' < "$hosts_file")"
 	return 0
 }
 
-# Average OS samples in [start_u, end_u] from os_metrics.csv.
-# Prints four lines: cpu_pct ram_gb net_mbs disk_gb (or n/a)
+# Average OS samples in [start_u, end_u] from a metrics csv (default: legacy os_metrics.csv).
+# Prints four values: cpu_pct ram_gb net_mbs disk_gb (or n/a)
 os_metrics_avg_over_window()
 {
 	local start_u="$1"
 	local end_u="$2"
-	local outfile
-	outfile=$(os_metrics_log_path)
+	local outfile="${3:-}"
+	if [ -z "$outfile" ]; then
+		outfile=$(os_metrics_log_path)
+	fi
 	if [ ! -f "$outfile" ] || [ -z "$start_u" ] || [ -z "$end_u" ]; then
 		echo "n/a n/a n/a n/a"
 		return 0
@@ -492,6 +732,7 @@ score_os_metrics_for_window()
 	local label="$1"
 	local start_u="$2"
 	local end_u="$3"
+	local outfile="${4:-}"
 	local cpu ram net disk
 
 	_fmt() {
@@ -511,12 +752,120 @@ score_os_metrics_for_window()
 		return 0
 	fi
 
-	read -r cpu ram net disk < <(os_metrics_avg_over_window "$start_u" "$end_u")
+	read -r cpu ram net disk < <(os_metrics_avg_over_window "$start_u" "$end_u" "$outfile")
 
 	printf "%-36s %14s\n" "$label CPU avg %" "$(_fmt "$cpu")"
 	printf "%-36s %14s\n" "$label RAM used avg GB" "$(_fmt "$ram")"
 	printf "%-36s %14s\n" "$label Network avg MB/s" "$(_fmt "$net")"
 	printf "%-36s %14s\n" "$label Disk used avg GB" "$(_fmt "$disk")"
+}
+
+os_metrics_recorded_hosts()
+{
+	local dir f base
+	dir=$(os_metrics_dir)
+	if [ -f "$dir/hosts" ] && [ -s "$dir/hosts" ]; then
+		sed '/^[[:space:]]*$/d' "$dir/hosts"
+		return 0
+	fi
+	if [ -d "$dir" ]; then
+		for f in "$dir"/*.csv; do
+			[ -f "$f" ] || continue
+			base=$(basename "$f" .csv)
+			printf '%s\n' "$base"
+		done
+		return 0
+	fi
+	if [ -f "$(os_metrics_log_path)" ]; then
+		hostname -s
+	fi
+}
+
+os_metrics_csv_for_host()
+{
+	local host="$1"
+	local dir csv
+	dir=$(os_metrics_dir)
+	csv="$dir/${host}.csv"
+	if [ -f "$csv" ]; then
+		printf '%s\n' "$csv"
+		return
+	fi
+	if [ -f "$(os_metrics_log_path)" ]; then
+		printf '%s\n' "$(os_metrics_log_path)"
+	fi
+}
+
+print_os_metrics_per_host_table()
+{
+	local heading="$1"
+	local label="$2"
+	local start_u="$3"
+	local end_u="$4"
+	local -a hosts=()
+	local -a cpu=() ram=() net=() disk=()
+	local h csv c r n d colw i
+	local host
+
+	os_metrics_fetch_remote_logs
+
+	while IFS= read -r host; do
+		[ -n "$host" ] || continue
+		hosts+=("$host")
+	done < <(os_metrics_recorded_hosts)
+
+	echo ""
+	printf "%-36s\n" "$heading"
+	if [ ${#hosts[@]} -eq 0 ]; then
+		score_os_metrics_for_window "$label" "$start_u" "$end_u"
+		return 0
+	fi
+
+	colw=22
+	for h in "${hosts[@]}"; do
+		if [ ${#h} -ge "$colw" ]; then
+			colw=$(( ${#h} + 2 ))
+		fi
+	done
+
+	printf "%-36s" "Host"
+	for h in "${hosts[@]}"; do
+		printf "%${colw}s" "$h"
+	done
+	printf "\n"
+
+	i=0
+	for h in "${hosts[@]}"; do
+		csv=$(os_metrics_csv_for_host "$h")
+		read -r c r n d < <(os_metrics_avg_over_window "$start_u" "$end_u" "$csv")
+		cpu[$i]=$c
+		ram[$i]=$r
+		net[$i]=$n
+		disk[$i]=$d
+		i=$((i + 1))
+	done
+
+	_fmt_cell() {
+		local v="$1"
+		if [ "$v" = "n/a" ] || [ -z "$v" ]; then
+			echo "n/a"
+		else
+			printf '%.3f' "$v" 2>/dev/null || echo "$v"
+		fi
+	}
+
+	printf "%-36s" "$label CPU avg %"
+	for i in "${!hosts[@]}"; do printf "%${colw}s" "$(_fmt_cell "${cpu[$i]}")"; done
+	printf "\n"
+	printf "%-36s" "$label RAM used avg GB"
+	for i in "${!hosts[@]}"; do printf "%${colw}s" "$(_fmt_cell "${ram[$i]}")"; done
+	printf "\n"
+	printf "%-36s" "$label Network avg MB/s"
+	for i in "${!hosts[@]}"; do printf "%${colw}s" "$(_fmt_cell "${net[$i]}")"; done
+	printf "\n"
+	printf "%-36s" "$label Disk used avg GB"
+	for i in "${!hosts[@]}"; do printf "%${colw}s" "$(_fmt_cell "${disk[$i]}")"; done
+	printf "\n"
 }
 
 # host|count|total|pct  — share of query executions on each backend host.
@@ -609,19 +958,15 @@ print_extended_score_metrics()
 	fi
 
 	if [ "${COLLECT_OS_DATA:-true}" = "true" ]; then
-		echo ""
-		printf "%-36s %14s\n" "---- OS metrics (05_sql) ----" ""
 		pair05=$(score_read_end_log_range "${LOCAL_PWD:-$PWD/../..}/log/end_sql.log")
 		[ -z "$pair05" ] && pair05=$(score_read_end_log_range "$PWD/../../log/end_sql.log")
 		s05=$(echo "$pair05" | awk '{print $1}')
 		e05=$(echo "$pair05" | awk '{print $2}')
-		score_os_metrics_for_window "05" "$s05" "$e05"
+		print_os_metrics_per_host_table "---- OS metrics per host (05_sql) ----" "05" "$s05" "$e05"
 
-		echo ""
-		printf "%-36s %14s\n" "---- OS metrics (07_multi) ----" ""
 		pair07=$(score_multi_user_time_range)
 		s07=$(echo "$pair07" | awk '{print $1}')
 		e07=$(echo "$pair07" | awk '{print $2}')
-		score_os_metrics_for_window "07" "$s07" "$e07"
+		print_os_metrics_per_host_table "---- OS metrics per host (07_multi) ----" "07" "$s07" "$e07"
 	fi
 }
