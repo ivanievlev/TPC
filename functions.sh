@@ -1138,11 +1138,60 @@ pgconfig_detect_drive_type()
 	echo "HDD"
 }
 
-# shared_buffers / max_connections / wal_buffers and similar only apply after restart.
-# ALTER SYSTEM writes postgresql.auto.conf; pg_reload_conf() is not enough.
-# Use stop+start with an absolute -D. `pg_ctl restart` reuses postmaster.opts, which
-# may contain a relative -D (e.g. "lukavega") resolved against the TPC cwd.
-pgconfig_restart_postgres()
+_patroni_yaml_top_scalar()
+{
+	local key="$1"
+	local file="$2"
+	awk -v k="$key" '
+		index($0, k ":") == 1 {
+			sub("^" k ":", "")
+			gsub(/^[ \t]+|[ \t]+$/, "")
+			gsub(/["'\'']/, "")
+			sub(/[ \t]*#.*$/, "")
+			print
+			exit
+		}
+	' "$file"
+}
+
+# Patroni daemon line for ADMIN_USER: ps aux | grep patroni (skip grep / patronictl).
+_patroni_admin_ps_line()
+{
+	local user="${ADMIN_USER:-$(whoami)}"
+	ps aux | grep patroni | grep -v grep | grep -v patronictl | awk -v u="$user" '
+		$1 == u || $1 == substr(u, 1, 8) { print; exit }
+	'
+}
+
+_patroni_yaml_from_ps_line()
+{
+	local line="$1"
+	local token
+	for token in $line; do
+		case "$token" in
+			*.yml|*.yaml)
+				printf '%s\n' "$token"
+				return 0
+				;;
+		esac
+	done
+	return 1
+}
+
+_pgconfig_wait_postgres()
+{
+	local i
+	for i in $(seq 1 90); do
+		if psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT 1" >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep 2
+	done
+	echo "ERROR: PostgreSQL did not accept connections after restart"
+	return 1
+}
+
+_pgconfig_restart_postgres_pgctl()
 {
 	local pgdata pg_ctl_bin postgres_bin
 
@@ -1171,7 +1220,52 @@ pgconfig_restart_postgres()
 	"$pg_ctl_bin" -D "$pgdata" stop -w -t 120 -m fast
 	echo "APPLY_PGCONFIG_PARAMETERS: $pg_ctl_bin -D $pgdata -l $pgdata/logfile start -w -t 120"
 	"$pg_ctl_bin" -D "$pgdata" -l "$pgdata/logfile" start -w -t 120
-	psql -d postgres -v ON_ERROR_STOP=1 -tA -c "SELECT 1" >/dev/null
+	_pgconfig_wait_postgres
+}
+
+# If ADMIN_USER has a Patroni process and patronictl, restart that member from the YAML
+# on the process command line. Otherwise pg_ctl stop+start (absolute -D; `pg_ctl restart`
+# may reuse a relative -D from postmaster.opts).
+pgconfig_restart_postgres()
+{
+	local user ps_line yaml cluster member patronictl_bin
+
+	user="${ADMIN_USER:-$(whoami)}"
+	ps_line=$(_patroni_admin_ps_line || true)
+	if [ -z "$ps_line" ]; then
+		echo "APPLY_PGCONFIG_PARAMETERS: no patroni process for ADMIN_USER=$user; using pg_ctl"
+		_pgconfig_restart_postgres_pgctl
+		return $?
+	fi
+	echo "APPLY_PGCONFIG_PARAMETERS: patroni process (ADMIN_USER=$user): $ps_line"
+
+	yaml=$(_patroni_yaml_from_ps_line "$ps_line" || true)
+	if [ -z "$yaml" ]; then
+		echo "APPLY_PGCONFIG_PARAMETERS: patroni process has no yaml config on the command line; using pg_ctl"
+		_pgconfig_restart_postgres_pgctl
+		return $?
+	fi
+	echo "APPLY_PGCONFIG_PARAMETERS: patroni yaml: $yaml"
+
+	patronictl_bin=$(which patronictl 2>/dev/null || true)
+	if [ -z "$patronictl_bin" ]; then
+		echo "APPLY_PGCONFIG_PARAMETERS: which patronictl found nothing for ADMIN_USER=$user; using pg_ctl"
+		_pgconfig_restart_postgres_pgctl
+		return $?
+	fi
+
+	cluster=$(_patroni_yaml_top_scalar "scope" "$yaml")
+	member=$(_patroni_yaml_top_scalar "name" "$yaml")
+	cluster=$(echo "$cluster" | tr -d '[:space:]')
+	member=$(echo "$member" | tr -d '[:space:]')
+	if [ -z "$cluster" ] || [ -z "$member" ]; then
+		echo "ERROR: patroni yaml $yaml has no top-level scope: / name: (needed for patronictl restart)"
+		return 1
+	fi
+
+	echo "APPLY_PGCONFIG_PARAMETERS: $patronictl_bin -c $yaml restart $cluster $member --force --timeout 180"
+	"$patronictl_bin" -c "$yaml" restart "$cluster" "$member" --force --timeout 180
+	_pgconfig_wait_postgres
 }
 
 # Instance-level pg_duckdb GUCs (memory/threads). Set once on DBNAME so every
