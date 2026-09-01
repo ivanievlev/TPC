@@ -56,17 +56,16 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 	for x in $(seq 1 $MULTI_USER_COUNT); do
 		session_log=$local_dir/../../log/testing_session_log/testing_session_$x.log
 		echo "$local_dir/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
-		$local_dir/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST" |& tee $session_log &
+		$local_dir/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST" > >(tee "$session_log") 2>&1 &
 		session_pids+=($!)
 	done
 
 	echo "Now executing queries. This may take a while."
 	echo "Waiting for ${#session_pids[@]} multi-user session(s)."
-	set +e
-	for pid in "${session_pids[@]}"; do
-		wait "$pid"
-	done
-	set -e
+	if ! wait_multi_user_sessions "${session_pids[@]}"; then
+		echo "SQL_ON_ERROR_STOP=true: a multi-user session hit a query error. Stopping."
+		exit 1
+	fi
 	echo "queries complete"
 	echo ""
 

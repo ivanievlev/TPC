@@ -540,6 +540,8 @@ tuples_from_explain_log()
 }
 
 # Classify SQL run from psql stderr + exit code → query_status for reports.
+# statement_timeout is "cancelled due to timeout", not ERROR:* (SQL_ON_ERROR_STOP
+# aborts only on ERROR:*).
 sql_query_status()
 {
 	local errfile=$1
@@ -572,6 +574,96 @@ sql_query_status()
 	fi
 
 	echo "succesfull"
+}
+
+# After log(): abort this 05_sql / 07 session if the query was ERROR:*.
+# Timeout ("cancelled due to timeout") is not an error. Remaining args are temp files to rm.
+sql_exit_if_query_error()
+{
+	if [ "${SQL_ON_ERROR_STOP:-false}" != "true" ]; then
+		return 0
+	fi
+	case "${QUERY_STATUS:-}" in
+		ERROR:*)
+			echo "SQL_ON_ERROR_STOP=true: aborting SQL after query error (${schema_name:-?}.${table_name:-?}): $QUERY_STATUS" >&2
+			rm -f "$@"
+			unset QUERY_STATUS QUERY_BACKEND_HOST
+			exit 1
+			;;
+	esac
+	return 0
+}
+
+kill_process_tree()
+{
+	local pid=$1
+	local sig=${2:-TERM}
+	local child
+
+	[ -n "$pid" ] || return 0
+	if ! kill -0 "$pid" 2>/dev/null; then
+		return 0
+	fi
+	for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+		kill_process_tree "$child" "$sig"
+	done
+	kill -s "$sig" "$pid" 2>/dev/null || true
+}
+
+# Wait for 07_multi_user test.sh PIDs. On the first non-zero exit with
+# SQL_ON_ERROR_STOP=true, kill remaining sessions so the step (and tpc.sh) stops.
+wait_multi_user_sessions()
+{
+	local -a alive=("$@")
+	local -a still
+	local pid rc fail=0 stat
+
+	if [ ${#alive[@]} -eq 0 ]; then
+		return 0
+	fi
+
+	while [ ${#alive[@]} -gt 0 ]; do
+		still=()
+		for pid in "${alive[@]}"; do
+			stat=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')
+			if [ -z "$stat" ] || [[ "$stat" == Z* ]]; then
+				rc=0
+				wait "$pid" || rc=$?
+				if [ "$rc" -ne 0 ]; then
+					fail=1
+					echo "Multi-user session pid $pid exited with status $rc." >&2
+				fi
+			else
+				still+=("$pid")
+			fi
+		done
+
+		if [ "$fail" -eq 1 ] && [ "${SQL_ON_ERROR_STOP:-false}" = "true" ]; then
+			echo "SQL_ON_ERROR_STOP=true: stopping remaining multi-user sessions after a query error." >&2
+			for pid in "${still[@]}"; do
+				kill_process_tree "$pid"
+			done
+			sleep 1
+			for pid in "${still[@]}"; do
+				kill_process_tree "$pid" KILL
+			done
+			for pid in "${still[@]}"; do
+				wait "$pid" 2>/dev/null || true
+			done
+			return 1
+		fi
+
+		if [ ${#still[@]} -eq 0 ]; then
+			break
+		fi
+		alive=("${still[@]}")
+		sleep 1
+	done
+
+	if [ "$fail" -eq 1 ] && [ "${SQL_ON_ERROR_STOP:-false}" = "true" ]; then
+		return 1
+	fi
+	return 0
 }
 
 # DuckDB instance-level GUCs (memory_limit, threads, …) cannot be SET after

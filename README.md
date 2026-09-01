@@ -143,11 +143,11 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 	
 - SQL_ON_ERROR_STOP="true"
 
-	``It is used to stop in case of every error. Essentially, errors shouldn't coour in stable environment. But for massive workload in unstable network you may specify "false" to skip trivial errors and make sure your test will complete.``
+	``Stop 05_sql and 07_multi_user when a query is classified as ERROR (any concurrent session). statement_timeout is not an error: the query is marked cancelled due to timeout and the run continues. Set false to keep going after query errors (unstable network / expected failures).``
 
 - STATEMENT_TIMEOUT="1h"
 
-	``PostgreSQL statement_timeout for TPC-DS queries (single-user and multi-user). Examples: 1min, 30min, 1h. On timeout the query is cancelled; with SQL_ON_ERROR_STOP=true the SQL step stops.``
+	``PostgreSQL statement_timeout for 05_sql and 07_multi_user. Examples: 1min, 30min, 1h. On timeout the query is cancelled and recorded; SQL_ON_ERROR_STOP does not treat timeout as an error.``
 
 - DBNAME="pg_tpc"
 

@@ -157,6 +157,7 @@ for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
 		fi
 		QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
 		log $tuples
+		sql_exit_if_query_error "$sql_outfile" "$sql_errfile" "$hostfile"
 		unset QUERY_STATUS QUERY_BACKEND_HOST
 		rm -f "$sql_outfile" "$sql_errfile" "$hostfile"
 	done
