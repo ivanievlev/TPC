@@ -228,12 +228,26 @@ source_bashrc()
 	# After admin profile. Must run before get_version/psql.
 	apply_tpc_pgport
 
-	count=$(grep -v "^#" ~/.bashrc  ~/.*profile | grep "greenplum_path" | wc -l)
+	local startup_files=()
+	local f
+	for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+		if [ -f "$f" ]; then
+			startup_files+=("$f")
+		fi
+	done
+	count=0
+	if [ "${#startup_files[@]}" -gt 0 ]; then
+		count=$(grep -h -v "^#" "${startup_files[@]}" | grep "greenplum_path" | wc -l)
+	fi
 	if [ "$count" -eq "0" ]; then
 		get_version
 		if [[ "$VERSION" == *"gpdb"* ]]; then
-			echo "$startup_file does not contain greenplum_path.sh"
-			echo "Please update your $startup_file for $ADMIN_USER and try again."
+			if [ "${#startup_files[@]}" -eq 0 ]; then
+				echo "No ~/.bashrc, ~/.bash_profile, or ~/.profile found for $ADMIN_USER"
+			else
+				echo "${startup_files[*]} do not contain greenplum_path.sh"
+			fi
+			echo "Please update the shell startup file for $ADMIN_USER and try again."
 			exit 1
 		fi
 	fi
