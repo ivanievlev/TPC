@@ -1304,11 +1304,11 @@ apply_duckdb_database_gucs()
 	echo "APPLY_DUCKDB_GUC: ALTER DATABASE $db SET duckdb.* from tpc_variables.sh"
 	echo "############################################################################"
 
-	sql="CALL duckdb.recycle_ddb();"
+	sql="CALL duckdb.recycle_ddb();"$'\n'
 	while IFS='|' read -r guc val; do
 		[ -z "$guc" ] && continue
 		echo "APPLY_DUCKDB_GUC: ALTER DATABASE $db SET $guc TO '$val'"
-		sql="${sql} ALTER DATABASE $db SET $guc TO '$val';"
+		sql="${sql}ALTER DATABASE $db SET $guc TO '$val';"$'\n'
 	done <<EOF
 duckdb.memory_limit|${DUCKDB_MEMORY_LIMIT:-4GB}
 duckdb.threads|${DUCKDB_THREADS:--1}
@@ -1316,8 +1316,11 @@ duckdb.max_workers_per_postgres_scan|${DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN:-2}
 duckdb.threads_for_postgres_scan|${DUCKDB_THREADS_FOR_POSTGRES_SCAN:-2}
 EOF
 
-	echo "APPLY_DUCKDB_GUC: CALL duckdb.recycle_ddb() then ALTER DATABASE (one session)"
-	if ! psql -d "$db" -v ON_ERROR_STOP=1 -c "$sql"; then
+	# Do not use psql -c with several statements: they run in one transaction,
+	# and duckdb.recycle_ddb() rejects transaction blocks. Stdin = one session,
+	# autocommit per statement (same backend through PgBouncer session pooling).
+	echo "APPLY_DUCKDB_GUC: CALL duckdb.recycle_ddb() then ALTER DATABASE (one session, autocommit)"
+	if ! psql -d "$db" -v ON_ERROR_STOP=1 <<<"$sql"; then
 		echo "ERROR: failed to apply duckdb.* database GUCs on $db (pg_duckdb missing, or recycle/ALTER failed)"
 		return 1
 	fi
