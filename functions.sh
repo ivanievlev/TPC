@@ -1285,9 +1285,11 @@ pgconfig_restart_postgres()
 # Instance-level pg_duckdb GUCs (memory/threads). Set once on DBNAME so every
 # new session (primary and replicas) inherits them before DuckDB starts.
 # ALTER DATABASE replicates via WAL; ALTER SYSTEM would stay on the primary.
+# recycle_ddb() must run in the same session as ALTER: PgBouncer may reuse a
+# backend where DuckDB is already initialized, and those GUCs cannot be SET then.
 apply_duckdb_database_gucs()
 {
-	local db guc val line
+	local db guc val sql
 
 	if [ "${RUN_SQL_WITH_DUCKDB:-false}" != "true" ]; then
 		return 0
@@ -1301,20 +1303,24 @@ apply_duckdb_database_gucs()
 	echo "############################################################################"
 	echo "APPLY_DUCKDB_GUC: ALTER DATABASE $db SET duckdb.* from tpc_variables.sh"
 	echo "############################################################################"
+
+	sql="CALL duckdb.recycle_ddb();"
 	while IFS='|' read -r guc val; do
 		[ -z "$guc" ] && continue
-		line="ALTER DATABASE $db SET $guc TO '$val'"
-		echo "APPLY_DUCKDB_GUC: $line"
-		if ! psql -d "$db" -v ON_ERROR_STOP=1 -c "$line"; then
-			echo "ERROR: failed to $line (is pg_duckdb installed in $db?)"
-			return 1
-		fi
+		echo "APPLY_DUCKDB_GUC: ALTER DATABASE $db SET $guc TO '$val'"
+		sql="${sql} ALTER DATABASE $db SET $guc TO '$val';"
 	done <<EOF
 duckdb.memory_limit|${DUCKDB_MEMORY_LIMIT:-4GB}
 duckdb.threads|${DUCKDB_THREADS:--1}
 duckdb.max_workers_per_postgres_scan|${DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN:-2}
 duckdb.threads_for_postgres_scan|${DUCKDB_THREADS_FOR_POSTGRES_SCAN:-2}
 EOF
+
+	echo "APPLY_DUCKDB_GUC: CALL duckdb.recycle_ddb() then ALTER DATABASE (one session)"
+	if ! psql -d "$db" -v ON_ERROR_STOP=1 -c "$sql"; then
+		echo "ERROR: failed to apply duckdb.* database GUCs on $db (pg_duckdb missing, or recycle/ALTER failed)"
+		return 1
+	fi
 	return 0
 }
 
