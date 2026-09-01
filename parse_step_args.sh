@@ -87,8 +87,11 @@ if [ -z "$APPLY_PGCONFIG_PARAMETERS" ]; then
 	APPLY_PGCONFIG_PARAMETERS="false"
 fi
 
-if type normalize_dat_file_subdirectory_name >/dev/null 2>&1; then
-	normalize_dat_file_subdirectory_name
+if [ -z "${DAT_FILE_DIRECTORY_PATH:-}" ]; then
+	DAT_FILE_DIRECTORY_PATH="/tmp"
+fi
+if type normalize_dat_file_directory_path >/dev/null 2>&1; then
+	normalize_dat_file_directory_path
 fi
 if type normalize_external_file_directory_path >/dev/null 2>&1; then
 	normalize_external_file_directory_path

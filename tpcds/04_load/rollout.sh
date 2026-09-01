@@ -207,7 +207,7 @@ else
 	done
 
 	if [ "$total_size" -eq 0 ]; then
-		echo "ERROR: no non-empty .dat files found under ${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_*"
+		echo "ERROR: no non-empty .dat files found under ${DAT_FILE_DIRECTORY_PATH}/datfiles_*"
 		exit 1
 	fi
 

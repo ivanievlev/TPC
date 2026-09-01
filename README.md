@@ -73,7 +73,7 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 - REPO_BRANCH="main"
 - TPC_MODE="TPC-DS"
 - ADMIN_USER="postgres"
-- DAT_FILE_SUBDIRECTORY_NAME="datfiles"
+- DAT_FILE_DIRECTORY_PATH="/tmp"
 - EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
 - EXPLAIN_ANALYZE="false"
 - RANDOM_DISTRIBUTION="false"
@@ -96,20 +96,17 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 
 ## New Arenadata parameters
 
-- DAT_FILE_SUBDIRECTORY_NAME="datfiles"
+- DAT_FILE_DIRECTORY_PATH="/tmp"
 
-	``Directory *name* (not a full path) under EXTERNAL_FILE_DIRECTORY_PATH for generated .dat files.
-	Default "datfiles". With EXTERNAL_FILE_DIRECTORY_PATH="/tmp" this yields:
-	gpfdist: /tmp/primary/gpseg0/datfiles (and /tmp/primary/gpsegN/datfiles on other primaries);
+	``Absolute root for generated .dat / .tbl files (default "/tmp"). The relative path under that root is hardcoded as ../datfiles (not a user knob).
+	Greenplum / gpfdist: /tmp/primary/gpseg0/../datfiles (i.e. /tmp/primary/datfiles), and the same on other primaries;
 	PostgreSQL: /tmp/datfiles_1, /tmp/datfiles_2, …
-	Former INSTALL_DIR="/arenadata" is migrated to this name automatically (basename of the old path).
-	The harness itself always runs in the git clone from which you started ./tpc.sh; log/ and segment_hosts.txt are created there.``
+	Independent of EXTERNAL_FILE_DIRECTORY_PATH so flat files and parquet/csv/json can sit on different disks.
+	Must be an absolute path without '..'.``
 
 - EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
 
-	``Absolute root for all generated data files (default "/tmp"). Combined with DAT_FILE_SUBDIRECTORY_NAME:
-	.dat for gpfdist: /tmp/primary/gpseg0/datfiles, /tmp/primary/gpseg1/datfiles, …;
-	.dat for PostgreSQL: /tmp/datfiles_1, /tmp/datfiles_2, …;
+	``Absolute root for parquet/csv/json trees (default "/tmp"), not for .dat files.
 	parquet/csv/json: /tmp/tpcds_<scale>_<format>/ (or tpch_…).
 	Must be an absolute path without '..'.``
 

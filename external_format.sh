@@ -247,10 +247,10 @@ external_dat_glob()
 	external_bench_defaults
 	case "${TPC_MODE}" in
 		TPC-H)
-			echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_*/${table_name}.tbl*"
+			echo "${DAT_FILE_DIRECTORY_PATH}/datfiles_*/${table_name}.tbl*"
 			;;
 		*)
-			echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_*/${table_name}_[0-9]*_[0-9]*.dat"
+			echo "${DAT_FILE_DIRECTORY_PATH}/datfiles_*/${table_name}_[0-9]*_[0-9]*.dat"
 			;;
 	esac
 }

@@ -20,61 +20,52 @@ ADMIN_USER=`whoami`
 ADMIN_HOME=$(eval echo ~$ADMIN_USER)
 MASTER_HOST=$(hostname -s)
 
-# .dat / gpfdist subdirectory name (not a clone path).
-# EXTERNAL_FILE_DIRECTORY_PATH is only the root. .dat files:
-#   GP:  $EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/$DAT_FILE_SUBDIRECTORY_NAME
-#   PG:  $EXTERNAL_FILE_DIRECTORY_PATH/${DAT_FILE_SUBDIRECTORY_NAME}_<child>
-# Do not take these from positional $42/$43 here: functions.sh is also sourced
-# from the top-level rollout.sh, where those slots are other flags (e.g. false).
+# DAT_FILE_DIRECTORY_PATH and EXTERNAL_FILE_DIRECTORY_PATH are separate absolute
+# roots so .dat/.tbl and parquet/csv/json can live on different disks.
+# Relative .dat path is hardcoded as ../datfiles (not a user knob):
+#   GP:  $DAT_FILE_DIRECTORY_PATH/primary/gpseg<N>/../datfiles
+#   PG:  $DAT_FILE_DIRECTORY_PATH/datfiles_<child>
+# EXTERNAL_FILE_DIRECTORY_PATH is only for parquet/csv/json trees.
 
-normalize_dat_file_subdirectory_name()
+_normalize_absolute_directory_path()
 {
-	local n="$DAT_FILE_SUBDIRECTORY_NAME"
-	n="${n#"${n%%[![:space:]]*}"}"
-	n="${n%"${n##*[![:space:]]}"}"
-	n="${n%/}"
-	# Allow leftover "/arenadata" (old INSTALL_DIR); reject nested paths.
-	if [[ "$n" == */* ]]; then
-		if [[ "$n" =~ ^/[^/]+$ ]]; then
-			n="${n#/}"
-		else
-			echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (got: ${DAT_FILE_SUBDIRECTORY_NAME})."
-			echo "Example: DAT_FILE_SUBDIRECTORY_NAME=\"datfiles\" → /tmp/primary/gpseg0/datfiles"
-			exit 1
-		fi
-	fi
-	if [ -z "$n" ] || [ "$n" = "." ] || [ "$n" = ".." ]; then
-		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (e.g. datfiles)."
-		exit 1
-	fi
-	if [[ ! "$n" =~ ^[A-Za-z0-9._-]+$ ]]; then
-		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME contains invalid characters: $n"
-		echo "Use a name like datfiles (no slashes or spaces)."
-		exit 1
-	fi
-	DAT_FILE_SUBDIRECTORY_NAME="$n"
-}
-
-normalize_external_file_directory_path()
-{
-	local p="$EXTERNAL_FILE_DIRECTORY_PATH"
+	local p="$1"
+	local name="$2"
+	local usage="$3"
 	p="${p#"${p%%[![:space:]]*}"}"
 	p="${p%"${p##*[![:space:]]}"}"
 	p="${p%/}"
 	if [[ "$p" != /* ]]; then
-		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute directory (got: ${EXTERNAL_FILE_DIRECTORY_PATH:-empty})."
-		echo "Use the root only (e.g. /tmp). .dat files are written under"
-		echo "  \$EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/\$DAT_FILE_SUBDIRECTORY_NAME"
-		exit 1
+		echo "ERROR: ${name} must be an absolute directory (got: ${1:-empty})." >&2
+		echo "$usage" >&2
+		return 1
 	fi
 	if [[ "$p" == */../* || "$p" == */.. || "$p" == ../* || "$p" == .. ]]; then
-		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must not contain '..' (got: $p)."
-		exit 1
+		echo "ERROR: ${name} must not contain '..' (got: $p)." >&2
+		return 1
 	fi
+	printf '%s\n' "$p"
+}
+
+normalize_dat_file_directory_path()
+{
+	local p
+	p=$(_normalize_absolute_directory_path "$DAT_FILE_DIRECTORY_PATH" "DAT_FILE_DIRECTORY_PATH" \
+		"Use the root only (e.g. /tmp). .dat files are written under \$DAT_FILE_DIRECTORY_PATH/primary/gpseg<N>/../datfiles") \
+		|| exit 1
+	DAT_FILE_DIRECTORY_PATH="$p"
+}
+
+normalize_external_file_directory_path()
+{
+	local p
+	p=$(_normalize_absolute_directory_path "$EXTERNAL_FILE_DIRECTORY_PATH" "EXTERNAL_FILE_DIRECTORY_PATH" \
+		"Use the root only (e.g. /tmp). parquet/csv/json trees go under \$EXTERNAL_FILE_DIRECTORY_PATH/tpcds_<scale>_<format>/") \
+		|| exit 1
 	EXTERNAL_FILE_DIRECTORY_PATH="$p"
 }
 
-# Greenplum .dat dir: $EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/$DAT_FILE_SUBDIRECTORY_NAME
+# Greenplum .dat dir: $DAT_FILE_DIRECTORY_PATH/primary/gpseg<N>/../datfiles
 # N comes from the segment datadir basename (e.g. /data1/primary/gpseg0 → gpseg0).
 gp_dat_dir()
 {
@@ -85,14 +76,14 @@ gp_dat_dir()
 		exit 1
 	fi
 	leaf=$(basename "$datadir")
-	echo "${EXTERNAL_FILE_DIRECTORY_PATH}/primary/${leaf}/${DAT_FILE_SUBDIRECTORY_NAME}"
+	echo "${DAT_FILE_DIRECTORY_PATH}/primary/${leaf}/../datfiles"
 }
 
-# PostgreSQL parallel chunks: $EXTERNAL_FILE_DIRECTORY_PATH/<name>_<child>
+# PostgreSQL parallel chunks: $DAT_FILE_DIRECTORY_PATH/datfiles_<child>
 pg_chunk_dat_dir()
 {
 	local child="$2"
-	echo "${EXTERNAL_FILE_DIRECTORY_PATH}/${DAT_FILE_SUBDIRECTORY_NAME}_${child}"
+	echo "${DAT_FILE_DIRECTORY_PATH}/datfiles_${child}"
 }
 
 # Flush OS page cache (pagecache + dentries + inodes). Requires passwordless sudo.

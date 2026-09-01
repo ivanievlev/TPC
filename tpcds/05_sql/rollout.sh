@@ -43,7 +43,7 @@ get_version
 if [[ "$VERSION" == *"gpdb"* ]]; then
   echo "DELETE_DAT_FILES_BEFORE_SQL: $DELETE_DAT_FILES_BEFORE_SQL"
   if [ "$DELETE_DAT_FILES_BEFORE_SQL" == "true" ]; then
-    gpssh -f /home/gpadmin/arenadata_configs/arenadata_segment_hosts.hosts -e "rm -Rf ${EXTERNAL_FILE_DIRECTORY_PATH}/primary/gpseg*/${DAT_FILE_SUBDIRECTORY_NAME}/*.dat ${EXTERNAL_FILE_DIRECTORY_PATH}/mirror/gpseg*/${DAT_FILE_SUBDIRECTORY_NAME}/*.dat"
+    gpssh -f /home/gpadmin/arenadata_configs/arenadata_segment_hosts.hosts -e "rm -Rf ${DAT_FILE_DIRECTORY_PATH}/primary/gpseg*/../datfiles/*.dat ${DAT_FILE_DIRECTORY_PATH}/mirror/gpseg*/../datfiles/*.dat"
   fi
 
   echo "Checking optimizer settings"

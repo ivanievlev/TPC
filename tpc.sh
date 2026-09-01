@@ -148,23 +148,19 @@ check_variables()
 		echo 'PGHOST="" # if empty then uses local connection via `unix_socket_directories`' >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
-	# INSTALL_DIR used to be the clone parent (/arenadata). Runtime is now
-	# this checkout; the name lives on as the gpfdist .dat subdirectory.
+	# INSTALL_DIR and DAT_FILE_SUBDIRECTORY_NAME are retired. .dat files use
+	# DAT_FILE_DIRECTORY_PATH plus a hardcoded relative path ../datfiles.
 	if grep -q '^INSTALL_DIR=' "$MYVAR" 2>/dev/null; then
-		if ! grep -q '^DAT_FILE_SUBDIRECTORY_NAME=' "$MYVAR" 2>/dev/null; then
-			_old_install_dir=$(grep '^INSTALL_DIR=' "$MYVAR" | tail -1 | sed 's/^INSTALL_DIR=//; s/^"//; s/"$//')
-			_dat_name=$(basename -- "${_old_install_dir:-arenadata}")
-			[ -z "$_dat_name" ] && _dat_name="arenadata"
-			echo "Renaming INSTALL_DIR -> DAT_FILE_SUBDIRECTORY_NAME=\"$_dat_name\" in $MYVAR"
-			echo "DAT_FILE_SUBDIRECTORY_NAME=\"$_dat_name\"" >> "$MYVAR"
-			unset _old_install_dir _dat_name
-		fi
 		sed -i '/^INSTALL_DIR=/d' "$MYVAR"
 		new_variable=$(($new_variable + 1))
 	fi
-	local count=$(grep "DAT_FILE_SUBDIRECTORY_NAME=" $MYVAR | wc -l)
+	if grep -q '^DAT_FILE_SUBDIRECTORY_NAME=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^DAT_FILE_SUBDIRECTORY_NAME=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "DAT_FILE_DIRECTORY_PATH=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "DAT_FILE_SUBDIRECTORY_NAME=\"datfiles\"" >> $MYVAR
+		echo "DAT_FILE_DIRECTORY_PATH=\"/tmp\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "EXTERNAL_FILE_DIRECTORY_PATH=" $MYVAR | wc -l)
@@ -479,36 +475,30 @@ check_variables()
 	if [ -z "${SKIP_TPCH_QUERIES_LIST+x}" ]; then
 		SKIP_TPCH_QUERIES_LIST=""
 	fi
-	_dat="$DAT_FILE_SUBDIRECTORY_NAME"
+	_dat="$DAT_FILE_DIRECTORY_PATH"
+	_dat="${_dat#"${_dat%%[![:space:]]*}"}"
+	_dat="${_dat%"${_dat##*[![:space:]]}"}"
 	_dat="${_dat%/}"
-	if [[ "$_dat" == */* ]]; then
-		if [[ "$_dat" =~ ^/[^/]+$ ]]; then
-			_dat="${_dat#/}"
-		else
-			echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (got: $DAT_FILE_SUBDIRECTORY_NAME)."
-			echo "Example: DAT_FILE_SUBDIRECTORY_NAME=\"datfiles\" → /tmp/primary/gpseg0/datfiles"
-			exit 1
-		fi
+	if [[ "$_dat" != /* ]]; then
+		echo "ERROR: DAT_FILE_DIRECTORY_PATH must be an absolute directory (got: $DAT_FILE_DIRECTORY_PATH)."
+		echo "Use the root only (e.g. /tmp). .dat files are written under"
+		echo "  \$DAT_FILE_DIRECTORY_PATH/primary/gpseg<N>/../datfiles"
+		exit 1
 	fi
-	DAT_FILE_SUBDIRECTORY_NAME="$_dat"
+	if [[ "$_dat" == */../* || "$_dat" == */.. || "$_dat" == ../* || "$_dat" == .. ]]; then
+		echo "ERROR: DAT_FILE_DIRECTORY_PATH must not contain '..' (got: $_dat)."
+		exit 1
+	fi
+	DAT_FILE_DIRECTORY_PATH="$_dat"
 	unset _dat
-	if [ -z "$DAT_FILE_SUBDIRECTORY_NAME" ] || [ "$DAT_FILE_SUBDIRECTORY_NAME" = "." ] || [ "$DAT_FILE_SUBDIRECTORY_NAME" = ".." ]; then
-		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME must be a single directory name (e.g. datfiles)."
-		exit 1
-	fi
-	if [[ ! "$DAT_FILE_SUBDIRECTORY_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
-		echo "ERROR: DAT_FILE_SUBDIRECTORY_NAME contains invalid characters: $DAT_FILE_SUBDIRECTORY_NAME"
-		echo "Use a name like datfiles (no slashes or spaces)."
-		exit 1
-	fi
 	_ext="$EXTERNAL_FILE_DIRECTORY_PATH"
 	_ext="${_ext#"${_ext%%[![:space:]]*}"}"
 	_ext="${_ext%"${_ext##*[![:space:]]}"}"
 	_ext="${_ext%/}"
 	if [[ "$_ext" != /* ]]; then
 		echo "ERROR: EXTERNAL_FILE_DIRECTORY_PATH must be an absolute directory (got: $EXTERNAL_FILE_DIRECTORY_PATH)."
-		echo "Use the root only (e.g. /tmp). .dat files are written under"
-		echo "  \$EXTERNAL_FILE_DIRECTORY_PATH/primary/gpseg<N>/\$DAT_FILE_SUBDIRECTORY_NAME"
+		echo "Use the root only (e.g. /tmp). parquet/csv/json trees go under"
+		echo "  \$EXTERNAL_FILE_DIRECTORY_PATH/tpcds_<scale>_<format>/"
 		exit 1
 	fi
 	if [[ "$_ext" == */../* || "$_ext" == */.. || "$_ext" == ../* || "$_ext" == .. ]]; then
@@ -771,7 +761,7 @@ echo_variables()
 	echo "PGPORT_WRITE: $PGPORT_WRITE"
 	echo "PGPORT_SELECT: $PGPORT_SELECT"
 	echo "PGHOST: ${PGHOST:-}"
-	echo "DAT_FILE_SUBDIRECTORY_NAME: $DAT_FILE_SUBDIRECTORY_NAME"
+	echo "DAT_FILE_DIRECTORY_PATH: $DAT_FILE_DIRECTORY_PATH"
 	echo "EXTERNAL_FILE_DIRECTORY_PATH: $EXTERNAL_FILE_DIRECTORY_PATH"
 	echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
 	echo "PARTITION_EVERY_FACTOR: $PARTITION_EVERY_FACTOR"

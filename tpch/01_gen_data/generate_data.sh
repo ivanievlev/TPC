@@ -12,7 +12,7 @@ DATA_DIRECTORY="$GEN_DATA_PATH"
 
 if [[ "$GEN_DATA_SCALE" == "" || "$CHILD" == "" || "$PARALLEL" == "" || "$GEN_DATA_PATH" == "" ]]; then
         echo "You must the scale, child, parallel, and gen_data_path."
-        echo "Example: ./rollout.sh 100 1 8 /tmp/primary/gpseg0/${DAT_FILE_SUBDIRECTORY_NAME}/"
+        echo "Example: ./rollout.sh 100 1 8 /tmp/primary/gpseg0/../datfiles/"
         exit 1
 fi
 

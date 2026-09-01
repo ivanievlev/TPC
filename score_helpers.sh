@@ -53,11 +53,11 @@ score_multi_user_time_range()
 	return 0
 }
 
-# Bytes of generated flat files (.dat / .tbl*) under EXTERNAL_FILE_DIRECTORY_PATH (and remote hosts if listed).
+# Bytes of generated flat files (.dat / .tbl*) under DAT_FILE_DIRECTORY_PATH (and remote hosts if listed).
 score_dat_bytes()
 {
 	local total=0 chunk hosts_file host
-	local root="${EXTERNAL_FILE_DIRECTORY_PATH}"
+	local root="${DAT_FILE_DIRECTORY_PATH}"
 
 	_sum_under() {
 		local dir="$1"
