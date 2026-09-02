@@ -17,6 +17,44 @@ score_ts_to_unix()
 	date -d "$ts" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S" "$ts" +%s 2>/dev/null || echo ""
 }
 
+_score_repo_root()
+{
+	if [ -n "${LOCAL_PWD:-}" ] && [ -d "${LOCAL_PWD}/log" ]; then
+		echo "$LOCAL_PWD"
+	elif [ -d "$PWD/log" ]; then
+		echo "$PWD"
+	else
+		echo "$PWD/../.."
+	fi
+}
+
+# Step basename from log/tpc_stopped_on_error (05_sql or 07_multi_user), or empty.
+score_stopped_on_error_step()
+{
+	local f
+	f="$(_score_repo_root)/log/tpc_stopped_on_error"
+	[ -f "$f" ] || return 0
+	awk -F= '/^step=/{print $2; exit}' "$f" | tr -d '[:space:]'
+}
+
+score_end_log_exists()
+{
+	[ -f "$(_score_repo_root)/log/$1" ]
+}
+
+# 07 finished this run and 08 copied testing reports. Leftover end_testing_*.log
+# from sessions killed by SQL_ON_ERROR_STOP are ignored.
+score_has_07_results()
+{
+	local stopped
+	stopped=$(score_stopped_on_error_step)
+	[ "${RUN_MULTI_USER:-false}" = "true" ] || return 1
+	[ "$stopped" != "05_sql" ] || return 1
+	[ "$stopped" != "07_multi_user" ] || return 1
+	score_end_log_exists end_multi_user_reports.log || return 1
+	return 0
+}
+
 score_read_end_log_range()
 {
 	# $1 = path to end_*.log → prints "start_unix end_unix" or empty
@@ -36,7 +74,13 @@ score_read_end_log_range()
 score_multi_user_time_range()
 {
 	local start_u="" end_u="" s e pair
-	local log_dir="${LOCAL_PWD:-$PWD/../..}/log/end_testing_log"
+	local log_dir
+
+	if ! score_has_07_results; then
+		return 0
+	fi
+
+	log_dir="${LOCAL_PWD:-$PWD/../..}/log/end_testing_log"
 	[ -d "$log_dir" ] || log_dir="$PWD/../../log/end_testing_log"
 	for f in "$log_dir"/end_testing_*.log; do
 		[ -f "$f" ] || continue
@@ -228,15 +272,48 @@ _score_from_tpt()
 	fi
 }
 
+_score_print_metric()
+{
+	local name="$1"
+	local val="$2"
+	case "$val" in
+		""|n/a)
+			printf "%-36s %14s\n" "$name" "n/a"
+			;;
+		"STOPPED ON ERROR"|skipped)
+			printf "%-36s %14s\n" "$name" "$val"
+			;;
+		*)
+			printf "%-36s %14.3f\n" "$name" "$val"
+			;;
+	esac
+}
+
+_score_psql_epoch()
+{
+	local sql="$1"
+	local v
+	v=$(psql -d "$DBNAME" -v ON_ERROR_STOP=0 -q -t -A -c "$sql" 2>/dev/null | tr -d '[:space:]')
+	if [ -z "$v" ]; then
+		echo ""
+	else
+		echo "$v"
+	fi
+}
+
 # Print the main SCORE table. 05_sql (1 User Queries / TPT / Score) is one block per iteration.
 print_tpc_score()
 {
 	local load_time constraints_time analyze_time concurrent_queries_time
 	local q tld num_score iter qtime tpt
 	local sql_iters
+	local stopped seven_label
 
-	load_time=$(_score_trim_num "$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from ${TPC_REPORT_SCHEMA}.load where tuples > 0")")
-	constraints_time=$(_score_trim_num "$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "
+	stopped=$(score_stopped_on_error_step)
+	seven_label="${MULTI_USER_COUNT} User Queries"
+
+	load_time=$(_score_psql_epoch "select coalesce(sum(extract('epoch' from duration)),0) from ${TPC_REPORT_SCHEMA}.load where tuples > 0")
+	constraints_time=$(_score_psql_epoch "
 select coalesce(sum(extract('epoch' from duration)),0)
 from ${TPC_REPORT_SCHEMA}.load
 where tuples = 0
@@ -244,69 +321,101 @@ where tuples = 0
        split_part(description, '.', 2) like 'idx\_%' escape chr(92)
        or split_part(description, '.', 2) like '%\_pkey' escape chr(92)
        or split_part(description, '.', 2) like 'constraint\_%' escape chr(92)
-      )")")
-	analyze_time=$(_score_trim_num "$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "
+      )")
+	analyze_time=$(_score_psql_epoch "
 select coalesce(sum(extract('epoch' from duration)),0)
 from ${TPC_REPORT_SCHEMA}.load
 where tuples = 0
   and split_part(description, '.', 2) not like 'idx\_%' escape chr(92)
   and split_part(description, '.', 2) not like '%\_pkey' escape chr(92)
-  and split_part(description, '.', 2) not like 'constraint\_%' escape chr(92)")")
+  and split_part(description, '.', 2) not like 'constraint\_%' escape chr(92)")
 
-	if [ "${RUN_MULTI_USER:-false}" = "true" ]; then
-		concurrent_queries_time=$(_score_trim_num "$(psql -d $DBNAME -v ON_ERROR_STOP=1 -q -t -A -c "select coalesce(sum(extract('epoch' from duration)),0) from ${TPC_TESTING_SCHEMA}.sql")")
+	if [ "$stopped" = "05_sql" ]; then
+		sql_iters=""
 	else
-		echo "Skipping multi-user time (RUN_MULTI_USER=${RUN_MULTI_USER:-false})"
+		sql_iters=$(score_sql_iteration_times "$TPC_REPORT_SCHEMA")
+	fi
+
+	if score_has_07_results; then
+		concurrent_queries_time=$(_score_trim_num "$(_score_psql_epoch "select coalesce(sum(extract('epoch' from duration)),0) from ${TPC_TESTING_SCHEMA}.sql")")
+	else
 		concurrent_queries_time=0
 	fi
 
-	sql_iters=$(score_sql_iteration_times "$TPC_REPORT_SCHEMA")
-
 	q=$((3*MULTI_USER_COUNT*TPC_QUERY_ID_MAX))
-	tld=$(echo "0.01*$MULTI_USER_COUNT*$load_time" | bc)
+	if [ -n "$load_time" ]; then
+		tld=$(echo "0.01*$MULTI_USER_COUNT*$load_time" | bc)
+	else
+		tld=""
+	fi
 	num_score=$(echo "$GEN_DATA_SCALE*$q" | bc)
 
 	printf "%-36s %14s\n" "Metric" "Value"
 	printf "%-36s %14s\n" "------------------------------------" "--------------"
 	printf "%-36s %14s\n" "TPC mode" "$TPC_MODE"
 	printf "%-36s %14s\n" "Scale Factor" "$GEN_DATA_SCALE"
-	printf "%-36s %14.3f\n" "Load" "$load_time"
-	printf "%-36s %14.3f\n" "Constraints after load" "$constraints_time"
-	printf "%-36s %14.3f\n" "Analyze" "$analyze_time"
+	if [ -n "$stopped" ]; then
+		printf "%-36s %14s\n" "${stopped}" "STOPPED ON ERROR"
+	fi
+	_score_print_metric "Load" "$load_time"
+	_score_print_metric "Constraints after load" "$constraints_time"
+	_score_print_metric "Analyze" "$analyze_time"
 
-	while IFS='|' read -r iter qtime; do
-		[ -z "$iter" ] && continue
-		qtime=$(_score_trim_num "$qtime")
-		printf "%-36s %14.3f\n" "1 User Queries (iter $iter)" "$qtime"
-	done <<< "$sql_iters"
-
-	if [ "${RUN_MULTI_USER:-false}" = "true" ]; then
-		printf "%-36s %14.3f\n" "${MULTI_USER_COUNT} User Queries" "$concurrent_queries_time"
+	if [ "$stopped" = "05_sql" ]; then
+		_score_print_metric "1 User Queries" "STOPPED ON ERROR"
+	elif [ -n "$sql_iters" ]; then
+		while IFS='|' read -r iter qtime; do
+			[ -z "$iter" ] && continue
+			qtime=$(_score_trim_num "$qtime")
+			_score_print_metric "1 User Queries (iter $iter)" "$qtime"
+		done <<< "$sql_iters"
 	else
-		printf "%-36s %14s\n" "${MULTI_USER_COUNT} User Queries" "skipped"
+		_score_print_metric "1 User Queries" "n/a"
+	fi
+
+	if [ "$stopped" = "07_multi_user" ]; then
+		_score_print_metric "$seven_label" "STOPPED ON ERROR"
+	elif score_has_07_results; then
+		_score_print_metric "$seven_label" "$concurrent_queries_time"
+	else
+		_score_print_metric "$seven_label" "skipped"
 	fi
 	printf "%-36s %14s\n" "Q" "$q"
 
-	while IFS='|' read -r iter qtime; do
-		[ -z "$iter" ] && continue
-		qtime=$(_score_trim_num "$qtime")
-		tpt=$(echo "$qtime*$MULTI_USER_COUNT" | bc)
-		printf "%-36s %14.3f\n" "TPT (iter $iter)" "$tpt"
-	done <<< "$sql_iters"
-
-	if [ "${RUN_MULTI_USER:-false}" = "true" ]; then
-		printf "%-36s %14.3f\n" "TTT" "$concurrent_queries_time"
+	if [ "$stopped" = "05_sql" ]; then
+		_score_print_metric "TPT" "STOPPED ON ERROR"
+	elif [ -n "$sql_iters" ]; then
+		while IFS='|' read -r iter qtime; do
+			[ -z "$iter" ] && continue
+			qtime=$(_score_trim_num "$qtime")
+			tpt=$(echo "$qtime*$MULTI_USER_COUNT" | bc)
+			_score_print_metric "TPT (iter $iter)" "$tpt"
+		done <<< "$sql_iters"
 	else
-		printf "%-36s %14s\n" "TTT" "skipped"
+		_score_print_metric "TPT" "n/a"
 	fi
-	printf "%-36s %14.3f\n" "TLD" "$tld"
 
-	while IFS='|' read -r iter qtime; do
-		[ -z "$iter" ] && continue
-		qtime=$(_score_trim_num "$qtime")
-		tpt=$(echo "$qtime*$MULTI_USER_COUNT" | bc)
-		printf "%-36s %14.3f\n" "Score (iter $iter)" "$(_score_from_tpt "$tpt" "$concurrent_queries_time" "$tld" "$num_score")"
-	done <<< "$sql_iters"
+	if [ "$stopped" = "07_multi_user" ]; then
+		_score_print_metric "TTT" "STOPPED ON ERROR"
+	elif score_has_07_results; then
+		_score_print_metric "TTT" "$concurrent_queries_time"
+	else
+		_score_print_metric "TTT" "skipped"
+	fi
+	_score_print_metric "TLD" "$tld"
+
+	if [ "$stopped" = "05_sql" ]; then
+		_score_print_metric "Score" "STOPPED ON ERROR"
+	elif [ -n "$sql_iters" ]; then
+		while IFS='|' read -r iter qtime; do
+			[ -z "$iter" ] && continue
+			qtime=$(_score_trim_num "$qtime")
+			tpt=$(echo "$qtime*$MULTI_USER_COUNT" | bc)
+			_score_print_metric "Score (iter $iter)" "$(_score_from_tpt "$tpt" "$concurrent_queries_time" "${tld:-0}" "$num_score")"
+		done <<< "$sql_iters"
+	else
+		_score_print_metric "Score" "n/a"
+	fi
 }
 
 # Parse duration like STATEMENT_TIMEOUT: 5s, 1min, 1m, 2h, 500ms → integer seconds (>=1).
@@ -661,7 +770,7 @@ start_os_metrics_collector()
 }
 
 # Average OS samples in [start_u, end_u] from a metrics csv (default: legacy os_metrics.csv).
-# Prints four values: cpu_pct ram_gb net_mbs disk_gb (or n/a)
+# Prints five values: cpu_pct ram_gb net_mbs disk_used_gb disk_total_gb (or n/a)
 os_metrics_avg_over_window()
 {
 	local start_u="$1"
@@ -671,7 +780,7 @@ os_metrics_avg_over_window()
 		outfile=$(os_metrics_log_path)
 	fi
 	if [ ! -f "$outfile" ] || [ -z "$start_u" ] || [ -z "$end_u" ]; then
-		echo "n/a n/a n/a n/a"
+		echo "n/a n/a n/a n/a n/a"
 		return 0
 	fi
 	python3 - "$outfile" "$start_u" "$end_u" <<'PY'
@@ -688,12 +797,13 @@ with open(path) as f:
             idle = float(parts[1]); total = float(parts[2])
             mem = float(parts[3]); rx = float(parts[4]); tx = float(parts[5])
             disk = float(parts[6])
+            disk_total = float(parts[7]) if len(parts) >= 8 else None
         except ValueError:
             continue
         if start_s <= ts <= end_s:
-            rows.append((ts, idle, total, mem, rx, tx, disk))
+            rows.append((ts, idle, total, mem, rx, tx, disk, disk_total))
 if len(rows) < 1:
-    print("n/a n/a n/a n/a")
+    print("n/a n/a n/a n/a n/a")
     sys.exit(0)
 
 # CPU: mean of per-interval busy% between consecutive samples
@@ -710,6 +820,8 @@ cpu = sum(cpu_vals) / len(cpu_vals) if cpu_vals else None
 
 ram_gb = sum(r[3] for r in rows) / len(rows) / (1024**3)
 disk_gb = sum(r[6] for r in rows) / len(rows) / (1024**3)
+disk_total_vals = [r[7] for r in rows if r[7] is not None]
+disk_total_gb = (sum(disk_total_vals) / len(disk_total_vals) / (1024**3)) if disk_total_vals else None
 
 net = None
 if len(rows) >= 2:
@@ -723,8 +835,26 @@ if len(rows) >= 2:
 def fmt(v):
     return "n/a" if v is None else f"{v:.6f}"
 
-print(fmt(cpu), fmt(ram_gb), fmt(net), fmt(disk_gb))
+print(fmt(cpu), fmt(ram_gb), fmt(net), fmt(disk_gb), fmt(disk_total_gb))
 PY
+}
+
+_fmt_disk_used_all()
+{
+	local used="$1"
+	local total="$2"
+	local used_fmt total_fmt
+	if [ "$used" = "n/a" ] || [ -z "$used" ]; then
+		echo "n/a"
+		return
+	fi
+	used_fmt=$(printf '%.3f' "$used" 2>/dev/null || echo "$used")
+	if [ "$total" = "n/a" ] || [ -z "$total" ]; then
+		echo "${used_fmt}/n/a"
+		return
+	fi
+	total_fmt=$(printf '%.0f' "$total" 2>/dev/null || echo "$total")
+	echo "${used_fmt}/${total_fmt}"
 }
 
 score_os_metrics_for_window()
@@ -733,7 +863,7 @@ score_os_metrics_for_window()
 	local start_u="$2"
 	local end_u="$3"
 	local outfile="${4:-}"
-	local cpu ram net disk
+	local cpu ram net disk disk_total
 
 	_fmt() {
 		local v="$1"
@@ -748,16 +878,16 @@ score_os_metrics_for_window()
 		printf "%-36s %14s\n" "$label CPU avg %" "n/a"
 		printf "%-36s %14s\n" "$label RAM used avg GB" "n/a"
 		printf "%-36s %14s\n" "$label Network avg MB/s" "n/a"
-		printf "%-36s %14s\n" "$label Disk used avg GB" "n/a"
+		printf "%-36s %14s\n" "$label Disk used/all avg GB" "n/a"
 		return 0
 	fi
 
-	read -r cpu ram net disk < <(os_metrics_avg_over_window "$start_u" "$end_u" "$outfile")
+	read -r cpu ram net disk disk_total < <(os_metrics_avg_over_window "$start_u" "$end_u" "$outfile")
 
 	printf "%-36s %14s\n" "$label CPU avg %" "$(_fmt "$cpu")"
 	printf "%-36s %14s\n" "$label RAM used avg GB" "$(_fmt "$ram")"
 	printf "%-36s %14s\n" "$label Network avg MB/s" "$(_fmt "$net")"
-	printf "%-36s %14s\n" "$label Disk used avg GB" "$(_fmt "$disk")"
+	printf "%-36s %14s\n" "$label Disk used/all avg GB" "$(_fmt_disk_used_all "$disk" "$disk_total")"
 }
 
 os_metrics_recorded_hosts()
@@ -803,8 +933,8 @@ print_os_metrics_per_host_table()
 	local start_u="$3"
 	local end_u="$4"
 	local -a hosts=()
-	local -a cpu=() ram=() net=() disk=()
-	local h csv c r n d colw i
+	local -a cpu=() ram=() net=() disk=() disk_total=()
+	local h csv c r n d dt colw i
 	local host
 
 	os_metrics_fetch_remote_logs
@@ -837,11 +967,12 @@ print_os_metrics_per_host_table()
 	i=0
 	for h in "${hosts[@]}"; do
 		csv=$(os_metrics_csv_for_host "$h")
-		read -r c r n d < <(os_metrics_avg_over_window "$start_u" "$end_u" "$csv")
+		read -r c r n d dt < <(os_metrics_avg_over_window "$start_u" "$end_u" "$csv")
 		cpu[$i]=$c
 		ram[$i]=$r
 		net[$i]=$n
 		disk[$i]=$d
+		disk_total[$i]=$dt
 		i=$((i + 1))
 	done
 
@@ -863,8 +994,8 @@ print_os_metrics_per_host_table()
 	printf "%-36s" "$label Network avg MB/s"
 	for i in "${!hosts[@]}"; do printf "%${colw}s" "$(_fmt_cell "${net[$i]}")"; done
 	printf "\n"
-	printf "%-36s" "$label Disk used avg GB"
-	for i in "${!hosts[@]}"; do printf "%${colw}s" "$(_fmt_cell "${disk[$i]}")"; done
+	printf "%-36s" "$label Disk used/all avg GB"
+	for i in "${!hosts[@]}"; do printf "%${colw}s" "$(_fmt_disk_used_all "${disk[$i]}" "${disk_total[$i]}")"; done
 	printf "\n"
 }
 
@@ -929,13 +1060,14 @@ print_extended_score_metrics()
 	local dat_b stor_b dat_gb stor_gb pct05 pct07
 	local pair05 pair07 s05 e05 s07 e07
 	local stor_label
+	local stopped
+
+	stopped=$(score_stopped_on_error_step)
 
 	dat_b=$(score_dat_bytes)
 	stor_b=$(score_storage_bytes)
 	dat_gb=$(bytes_to_gb "$dat_b")
 	stor_gb=$(bytes_to_gb "$stor_b")
-	pct07=$(score_query_success_pct "$testing_schema" sql)
-	[ -z "$pct07" ] && pct07=0
 
 	case "${USE_EXTERNAL_FORMAT:-false}" in
 		parquet|csv|json) stor_label="Storage (${USE_EXTERNAL_FORMAT}) GB" ;;
@@ -944,29 +1076,51 @@ print_extended_score_metrics()
 
 	printf "%-36s %14.3f\n" "DAT/TBL flat files GB" "$dat_gb"
 	printf "%-36s %14.3f\n" "$stor_label" "$stor_gb"
-	while IFS='|' read -r iter pct05; do
-		[ -z "$iter" ] && continue
-		pct05=$(echo "$pct05" | tr -d '[:space:]')
-		[ -z "$pct05" ] && pct05=0
-		printf "%-36s %14s\n" "05_sql success % (iter $iter)" "$pct05"
-	done < <(score_sql_iteration_success_pct "$report_schema")
-	printf "%-36s %14s\n" "07_multi_user success %" "$pct07"
+	if [ "$stopped" = "05_sql" ]; then
+		printf "%-36s %14s\n" "05_sql success %" "STOPPED ON ERROR"
+	else
+		while IFS='|' read -r iter pct05; do
+			[ -z "$iter" ] && continue
+			pct05=$(echo "$pct05" | tr -d '[:space:]')
+			[ -z "$pct05" ] && pct05=0
+			printf "%-36s %14s\n" "05_sql success % (iter $iter)" "$pct05"
+		done < <(score_sql_iteration_success_pct "$report_schema")
+	fi
+	if [ "$stopped" = "07_multi_user" ]; then
+		printf "%-36s %14s\n" "07_multi_user success %" "STOPPED ON ERROR"
+	elif score_has_07_results; then
+		pct07=$(score_query_success_pct "$testing_schema" sql)
+		[ -z "$pct07" ] && pct07=0
+		printf "%-36s %14s\n" "07_multi_user success %" "$pct07"
+	else
+		printf "%-36s %14s\n" "07_multi_user success %" "skipped"
+	fi
 
-	print_score_queries_per_host "---- Statistics queries per host (05_sql) ----" "$report_schema" sql
-	if [ "${RUN_MULTI_USER:-false}" = "true" ]; then
+	if [ "$stopped" != "05_sql" ]; then
+		print_score_queries_per_host "---- Statistics queries per host (05_sql) ----" "$report_schema" sql
+	fi
+	if score_has_07_results; then
 		print_score_queries_per_host "---- Statistics queries per host (07_sql) ----" "$testing_schema" sql
 	fi
 
 	if [ "${COLLECT_OS_DATA:-true}" = "true" ]; then
-		pair05=$(score_read_end_log_range "${LOCAL_PWD:-$PWD/../..}/log/end_sql.log")
-		[ -z "$pair05" ] && pair05=$(score_read_end_log_range "$PWD/../../log/end_sql.log")
-		s05=$(echo "$pair05" | awk '{print $1}')
-		e05=$(echo "$pair05" | awk '{print $2}')
+		s05=""
+		e05=""
+		if [ "$stopped" != "05_sql" ]; then
+			pair05=$(score_read_end_log_range "${LOCAL_PWD:-$PWD/../..}/log/end_sql.log")
+			[ -z "$pair05" ] && pair05=$(score_read_end_log_range "$PWD/../../log/end_sql.log")
+			s05=$(echo "$pair05" | awk '{print $1}')
+			e05=$(echo "$pair05" | awk '{print $2}')
+		fi
 		print_os_metrics_per_host_table "---- OS metrics per host (05_sql) ----" "05" "$s05" "$e05"
 
-		pair07=$(score_multi_user_time_range)
-		s07=$(echo "$pair07" | awk '{print $1}')
-		e07=$(echo "$pair07" | awk '{print $2}')
+		s07=""
+		e07=""
+		if score_has_07_results; then
+			pair07=$(score_multi_user_time_range)
+			s07=$(echo "$pair07" | awk '{print $1}')
+			e07=$(echo "$pair07" | awk '{print $2}')
+		fi
 		print_os_metrics_per_host_table "---- OS metrics per host (07_multi) ----" "07" "$s07" "$e07"
 	fi
 }

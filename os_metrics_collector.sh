@@ -3,11 +3,11 @@
 # Usage: os_metrics_collector.sh <outfile> <period_seconds>
 # One process per host; SCORE reads log/os_metrics/<hostname>.csv.
 # CSV columns (space-separated):
-#   ts_unix cpu_idle cpu_total mem_used_bytes net_rx_bytes net_tx_bytes disk_used_bytes
+#   ts_unix cpu_idle cpu_total mem_used_bytes net_rx_bytes net_tx_bytes disk_used_bytes disk_total_bytes
 #
 # cpu_* are cumulative jiffies from /proc/stat (all CPUs).
 # net_* are cumulative bytes over non-loopback interfaces.
-# disk_used_bytes is sum of used space on real filesystems (df).
+# disk_* are sums of used / size on real local filesystems (df --local).
 
 set -u
 
@@ -65,11 +65,11 @@ read_net()
 	' /proc/net/dev
 }
 
-read_disk_used()
+read_disk()
 {
-	# Sum used bytes; exclude pseudo filesystems.
+	# Prints: used_bytes total_bytes (sum of real local filesystems).
 	df -B1 --local -x tmpfs -x devtmpfs -x overlay -x squashfs -x iso9660 2>/dev/null \
-		| awk 'NR>1 { used+=$3 } END { print used+0 }'
+		| awk 'NR>1 { used+=$3; total+=$2 } END { print used+0, total+0 }'
 }
 
 # Truncate / start fresh for this run
@@ -80,7 +80,7 @@ while true; do
 	cpu=$(read_cpu)
 	mem=$(read_mem_used)
 	net=$(read_net)
-	disk=$(read_disk_used)
+	disk=$(read_disk)
 	# shellcheck disable=SC2086
 	echo "$ts $cpu $mem $net $disk" >> "$OUTFILE"
 	sleep "$PERIOD_SEC"

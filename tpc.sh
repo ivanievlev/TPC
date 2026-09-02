@@ -1025,6 +1025,9 @@ archive_tpcds_log()
 
 	prefix="${TPC_LOG_PREFIX:-tpcds}"
 	log_dir="$PWD/log/archived_results"
+	if [ -f "$PWD/log/tpc_stopped_on_error" ]; then
+		log_dir="$PWD/log/archived_results/stopped_on_error"
+	fi
 	mkdir -p "$log_dir"
 	ts=$(date +%Y%m%d_%H%M%S)
 	dest="$log_dir/${ts}_${prefix}_SF${GEN_DATA_SCALE}_${format}${duck_suffix}.log"
@@ -1072,13 +1075,21 @@ if [ "$MAKE_PREREQUISITES" == "true" ]; then
 fi
 
 
-as_admin "cd \"$PWD\"; PGPORT_WRITE=\"${PGPORT_WRITE:-5432}\" PGPORT_SELECT=\"${PGPORT_SELECT:-5432}\" PGPORT=\"${PGPORT_WRITE:-5432}\" PGHOST=\"${PGHOST:-}\" ./rollout.sh"
+rollout_rc=0
+as_admin "cd \"$PWD\"; PGPORT_WRITE=\"${PGPORT_WRITE:-5432}\" PGPORT_SELECT=\"${PGPORT_SELECT:-5432}\" PGPORT=\"${PGPORT_WRITE:-5432}\" PGHOST=\"${PGHOST:-}\" ./rollout.sh" || rollout_rc=$?
 
-# Final marker for tpc.log / tail -f (printed only after rollout returns successfully;
-# independent of which RUN_* steps were enabled).
+# Final marker for tpc.log / tail -f (printed after rollout returns, including SQL_ON_ERROR_STOP).
 echo ""
-echo "The end. All ${TPC_BENCH_LABEL} steps completed"
+if [ "$rollout_rc" -eq 0 ]; then
+	echo "The end. All ${TPC_BENCH_LABEL} steps completed"
+elif [ -f "$PWD/log/tpc_stopped_on_error" ]; then
+	echo "The end. ${TPC_BENCH_LABEL} stopped on SQL error; SCORE used completed steps only"
+else
+	echo "The end. ${TPC_BENCH_LABEL} rollout failed (exit $rollout_rc)"
+fi
 
-# Keep rewriting tpc.log each run; also archive a timestamped copy under log/archived_results/.
+# Keep rewriting tpc.log each run; also archive a timestamped copy under log/archived_results/
+# (or log/archived_results/stopped_on_error/ when 05/07 stopped on SQL error).
 archive_tpcds_log
+exit "$rollout_rc"
 

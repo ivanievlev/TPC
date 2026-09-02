@@ -381,7 +381,8 @@ ensure_log_dirs()
 		"$LOCAL_PWD/log/rollout_testing_log" \
 		"$LOCAL_PWD/log/testing_session_log" \
 		"$LOCAL_PWD/log/single_explain_analyze_log" \
-		"$LOCAL_PWD/log/archived_results"
+		"$LOCAL_PWD/log/archived_results" \
+		"$LOCAL_PWD/log/archived_results/stopped_on_error"
 }
 
 # Resolve directories for end_*.log / rollout_*.log of a step.
@@ -576,8 +577,9 @@ sql_query_status()
 	echo "succesfull"
 }
 
-# After log(): abort this 05_sql / 07 session if the query was ERROR:*.
-# Timeout ("cancelled due to timeout") is not an error. Remaining args are temp files to rm.
+# After log(): stop this 05_sql / 07 session if the query was ERROR:*.
+# Timeout is not an error. Do not write end_*.log — the failed step is incomplete;
+# rollout.sh jumps to 09_score. Remaining args are temp files to rm.
 sql_exit_if_query_error()
 {
 	if [ "${SQL_ON_ERROR_STOP:-false}" != "true" ]; then
@@ -611,7 +613,7 @@ kill_process_tree()
 }
 
 # Wait for 07_multi_user test.sh PIDs. On the first non-zero exit with
-# SQL_ON_ERROR_STOP=true, kill remaining sessions so the step (and tpc.sh) stops.
+# SQL_ON_ERROR_STOP=true, kill remaining sessions (rollout then jumps to SCORE).
 wait_multi_user_sessions()
 {
 	local -a alive=("$@")

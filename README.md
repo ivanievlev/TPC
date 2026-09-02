@@ -48,13 +48,15 @@ nohup ./tpc.sh > tpc.log 2>&1 < tpc.log &
 <watching the log>
 tail -f tpc.log 
 
-When the run finishes successfully, the last line is:
-The end. All TPC-DS steps completed
-(or All TPC-H steps completed, depending on TPC_MODE)
+When the run finishes, the last line is one of:
+- `The end. All TPC-DS steps completed` (or TPC-H)
+- `The end. TPC-DS stopped on SQL error; SCORE used completed steps only`
+- `The end. TPC-DS rollout failed (exit N)`
 
 A timestamped copy of `tpc.log` is also saved under `log/archived_results/`:
 `<YYYYMMDD_HHMMSS>_tpcds_SF<scale>_<format>[_with-duckdb].log` (or `tpch_…`)
 (`format` is `heap`, or `parquet`/`csv`/`json`; `_with-duckdb` only when `RUN_SQL_WITH_DUCKDB=true`).
+If `SQL_ON_ERROR_STOP=true` aborted 05_sql or 07_multi_user, the copy goes to `log/archived_results/stopped_on_error/` instead (SCORE still runs on completed steps).
 Timestamp-first naming sorts chronologically for later analysis.
 
 Step logs go into subdirectories of `log/`:
@@ -92,7 +94,8 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 	Compile (00_compile_tpcds / 00_compile_tpch) and score (09_score) always run; there are no RUN_COMPILE_TPC or RUN_SCORE flags.
 	RUN_SINGLE_USER=true always runs 05_sql and then 06_single_user_reports.
 	RUN_MULTI_USER=true always runs 07_multi_user and then 08_multi_user_reports.
-	There are no separate report flags.``
+	There are no separate report flags.
+	If SQL_ON_ERROR_STOP=true and 05_sql or 07_multi_user exits on a query ERROR, that step is not given end_*.log, later steps except 09_score are skipped, and SCORE uses only successfully completed steps.``
 
 ## New Arenadata parameters
 
@@ -143,7 +146,7 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 	
 - SQL_ON_ERROR_STOP="true"
 
-	``Stop 05_sql and 07_multi_user when a query is classified as ERROR (any concurrent session). statement_timeout is not an error: the query is marked cancelled due to timeout and the run continues. Set false to keep going after query errors (unstable network / expected failures).``
+	``Stop 05_sql and 07_multi_user when a query is classified as ERROR (any concurrent session). The failed step is not marked with end_*.log; remaining steps (including 06/08) are skipped and 09_score runs on successfully completed steps only (e.g. 07 ERROR → SCORE from 05, with 07 marked STOPPED ON ERROR). statement_timeout is not an error: the query is marked cancelled due to timeout and the run continues. Set false to keep going after query errors (unstable network / expected failures).``
 
 - STATEMENT_TIMEOUT="1h"
 

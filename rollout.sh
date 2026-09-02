@@ -176,6 +176,7 @@ fi
 
 export RUN_MULTI_USER APPLY_PGCONFIG_PARAMETERS
 rm -f $PWD/log/end_score.log
+rm -f $PWD/log/tpc_stopped_on_error
 
 step_run_flag()
 {
@@ -196,12 +197,19 @@ step_run_flag()
 	esac
 }
 
+TPC_STOPPED_ON_ERROR=""
+
 while IFS= read -r i; do
 	[ -z "$i" ] && continue
 	[ -d "$i" ] || continue
+	base=$(basename "$i")
 	run_flag=$(step_run_flag "$i")
 	if [ "$run_flag" != "true" ]; then
 		echo "Skipping $i (corresponding RUN_*=false)"
+		continue
+	fi
+	if [ -n "$TPC_STOPPED_ON_ERROR" ] && [ "$base" != "09_score" ]; then
+		echo "Skipping $i (SQL_ON_ERROR_STOP: $TPC_STOPPED_ON_ERROR STOPPED ON ERROR)"
 		continue
 	fi
 	echo "$i/rollout.sh"
@@ -209,5 +217,25 @@ while IFS= read -r i; do
 	echo "  PGPORT=$PGPORT (WRITE=$PGPORT_WRITE SELECT=$PGPORT_SELECT)"
 	# Close stdin so step scripts (ssh, tools, etc.) cannot consume the step list
 	# from this while-read loop (classic bash pitfall).
-	$i/rollout.sh </dev/null
+	if "$i/rollout.sh" </dev/null; then
+		:
+	else
+		rc=$?
+		echo "WARNING: $i/rollout.sh exited $rc"
+		if [ "${SQL_ON_ERROR_STOP:-false}" = "true" ] && { [ "$base" = "05_sql" ] || [ "$base" = "07_multi_user" ]; }; then
+			TPC_STOPPED_ON_ERROR="$base"
+			{
+				echo "step=$base"
+				echo "exit_code=$rc"
+			} > "$PWD/log/tpc_stopped_on_error"
+			echo "SQL_ON_ERROR_STOP=true: $base STOPPED ON ERROR (no end_*.log). Remaining steps skipped except SCORE."
+			continue
+		fi
+		exit "$rc"
+	fi
 done < <(tpc_step_dirs "$PWD")
+
+if [ -n "$TPC_STOPPED_ON_ERROR" ]; then
+	echo "Rollout stopped on error in $TPC_STOPPED_ON_ERROR; SCORE used successfully completed steps only."
+	exit 1
+fi
