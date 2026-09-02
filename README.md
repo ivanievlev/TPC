@@ -53,10 +53,11 @@ When the run finishes, the last line is one of:
 - `The end. TPC-DS stopped on SQL error; SCORE used completed steps only`
 - `The end. TPC-DS rollout failed (exit N)`
 
-A timestamped copy of `tpc.log` is also saved under `log/archived_results/`:
+A timestamped copy of `tpc.log` is saved under `log/archived_results/` only when step 09_score finished (`log/end_score.log` exists):
 `<YYYYMMDD_HHMMSS>_tpcds_SF<scale>_<format>[_with-duckdb].log` (or `tpch_…`)
 (`format` is `heap`, or `parquet`/`csv`/`json`; `_with-duckdb` only when `RUN_SQL_WITH_DUCKDB=true`).
-If `SQL_ON_ERROR_STOP=true` aborted 05_sql or 07_multi_user, the copy goes to `log/archived_results/stopped_on_error/` instead (SCORE still runs on completed steps).
+If `SQL_ON_ERROR_STOP=true` aborted 05_sql or 07_multi_user, SCORE still runs and the copy goes to `log/archived_results/stopped_on_error/` instead.
+Runs that fail earlier (Patroni leader check, 00–04, etc.) are not archived.
 Timestamp-first naming sorts chronologically for later analysis.
 
 Step logs go into subdirectories of `log/`:

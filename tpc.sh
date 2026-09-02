@@ -1088,8 +1088,12 @@ else
 	echo "The end. ${TPC_BENCH_LABEL} rollout failed (exit $rollout_rc)"
 fi
 
-# Keep rewriting tpc.log each run; also archive a timestamped copy under log/archived_results/
-# (or log/archived_results/stopped_on_error/ when 05/07 stopped on SQL error).
-archive_tpcds_log
+# Archive only when 09_score finished (end_score.log). Failures before SCORE
+# (Patroni leader check, 00–04, etc.) keep tpc.log as the live log only.
+if [ -f "$PWD/log/end_score.log" ]; then
+	archive_tpcds_log
+else
+	echo "SCORE did not run; skipped archive copy"
+fi
 exit "$rollout_rc"
 

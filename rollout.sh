@@ -26,6 +26,11 @@ if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTI
 fi
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
+# Drop this-run SCORE markers before any early exit (Patroni leader check, etc.)
+# so tpc.sh does not archive a leftover end_score.log from a previous run.
+rm -f "$PWD/log/end_score.log"
+rm -f "$PWD/log/tpc_stopped_on_error"
+
 # Patroni: generation, DDL, COPY FROM, and reports must run on the leader so
 # the Postgres backend sees files on this host (HAProxy 16432 would otherwise
 # execute COPY on another node).
@@ -180,8 +185,7 @@ if [ "$RUN_MULTI_USER" == "true" ]; then
 fi
 
 export RUN_MULTI_USER APPLY_PGCONFIG_PARAMETERS
-rm -f $PWD/log/end_score.log
-rm -f $PWD/log/tpc_stopped_on_error
+# end_score.log / tpc_stopped_on_error already removed before the Patroni check.
 
 step_run_flag()
 {
