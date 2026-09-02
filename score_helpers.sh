@@ -509,6 +509,10 @@ _os_metrics_ssh_opts()
 
 _os_metrics_patroni_yaml_path()
 {
+	if type _patroni_yaml_path >/dev/null 2>&1; then
+		_patroni_yaml_path
+		return $?
+	fi
 	local line token
 	line=$(ps aux | grep patroni | grep -v grep | grep -v patronictl | awk '
 		{ print; exit }
@@ -531,7 +535,11 @@ _os_metrics_patroni_members()
 	local yaml ctl json user
 	yaml=$(_os_metrics_patroni_yaml_path || true)
 	[ -n "$yaml" ] || return 1
-	ctl=$(command -v patronictl 2>/dev/null || true)
+	if type _patroni_ctl_bin >/dev/null 2>&1; then
+		ctl=$(_patroni_ctl_bin || true)
+	else
+		ctl=$(command -v patronictl 2>/dev/null || true)
+	fi
 	if [ -z "$ctl" ]; then
 		return 1
 	fi
@@ -541,9 +549,6 @@ _os_metrics_patroni_members()
 	else
 		user="${ADMIN_USER:-postgres}"
 		json=$(sudo -n -u "$user" -H "$ctl" -c "$yaml" list --format json 2>/dev/null || true)
-		if [ -z "$json" ]; then
-			json=$(sudo -n -u "$user" -H bash -lc "patronictl -c '$yaml' list --format json" 2>/dev/null || true)
-		fi
 	fi
 	[ -n "$json" ] || return 1
 	python3 -c '

@@ -26,6 +26,11 @@ if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTI
 fi
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
 
+# Patroni: generation, DDL, COPY FROM, and reports must run on the leader so
+# the Postgres backend sees files on this host (HAProxy 16432 would otherwise
+# execute COPY on another node).
+require_tpc_host_is_patroni_leader
+
 export DAT_FILE_DIRECTORY_PATH EXTERNAL_FILE_DIRECTORY_PATH
 
 hive_on=$(echo "${EXTERNAL_HIVE_PARTITIONING}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')

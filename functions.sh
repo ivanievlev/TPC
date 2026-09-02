@@ -1286,6 +1286,153 @@ _patroni_yaml_from_ps_line()
 	return 1
 }
 
+_tpc_has_local_ip()
+{
+	local ip="$1"
+	[ -n "$ip" ] || return 1
+	ip=$(echo "$ip" | tr -d '[:space:]')
+	[ -z "$ip" ] && return 1
+	hostname -I 2>/dev/null | tr ' ' '\n' | grep -qx "$ip"
+}
+
+# First Patroni daemon line (same filter as OS metrics COLLECT_OS_DATA).
+_patroni_ps_line()
+{
+	ps aux | grep patroni | grep -v grep | grep -v patronictl | awk '{ print; exit }'
+}
+
+_patroni_bin_from_ps_line()
+{
+	local line="$1"
+	local token base
+	for token in $line; do
+		base=$(basename "$token")
+		if [ "$base" = "patroni" ]; then
+			printf '%s\n' "$token"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# patronictl next to the running patroni binary (from ps), else PATH.
+_patroni_ctl_bin()
+{
+	local line bin dir ctl
+	line=$(_patroni_ps_line || true)
+	if [ -n "$line" ]; then
+		bin=$(_patroni_bin_from_ps_line "$line" || true)
+		if [ -n "$bin" ]; then
+			dir=$(dirname "$bin")
+			ctl="$dir/patronictl"
+			if [ -x "$ctl" ]; then
+				printf '%s\n' "$ctl"
+				return 0
+			fi
+		fi
+	fi
+	ctl=$(command -v patronictl 2>/dev/null || true)
+	[ -n "$ctl" ] || return 1
+	printf '%s\n' "$ctl"
+}
+
+# YAML from the same ps line as COLLECT_OS_DATA (no hardcoded ADP paths).
+_patroni_yaml_path()
+{
+	local line
+	line=$(_patroni_ps_line || true)
+	[ -n "$line" ] || return 1
+	_patroni_yaml_from_ps_line "$line"
+}
+
+_patroni_list_json()
+{
+	local yaml="$1"
+	local ctl json user
+	ctl=$(_patroni_ctl_bin || true)
+	[ -n "$ctl" ] || return 1
+	if [ -r "$yaml" ]; then
+		json=$("$ctl" -c "$yaml" list --format json 2>/dev/null || true)
+	fi
+	if [ -z "$json" ]; then
+		user="${ADMIN_USER:-postgres}"
+		json=$(sudo -n -u "$user" -H "$ctl" -c "$yaml" list --format json 2>/dev/null || true)
+	fi
+	[ -n "$json" ] || return 1
+	printf '%s\n' "$json"
+}
+
+# Prints "member|host" for the Patroni Leader (or empty / exit 1).
+_patroni_leader_ident()
+{
+	python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(1)
+data = json.loads(raw)
+if isinstance(data, dict):
+    data = data.get("members") or data.get("Members") or []
+if not isinstance(data, list):
+    sys.exit(1)
+for m in data:
+    if not isinstance(m, dict):
+        continue
+    role = str(m.get("Role") or m.get("role") or "").strip().lower()
+    if role not in ("leader", "master", "primary"):
+        continue
+    member = str(m.get("Member") or m.get("member") or m.get("Name") or "").strip()
+    host = str(m.get("Host") or m.get("host") or "").strip()
+    print("%s|%s" % (member, host))
+    sys.exit(0)
+sys.exit(1)
+'
+}
+
+# Server-side COPY FROM / DDL files are read by the Postgres backend. With Patroni
+# that must be this TPC host (the leader). Otherwise COPY looks for paths on another node.
+require_tpc_host_is_patroni_leader()
+{
+	local yaml json pair leader_member leader_host tpc_host
+
+	yaml=$(_patroni_yaml_path || true)
+	if [ -z "$yaml" ]; then
+		echo "No Patroni config on this host; skipping TPC-on-leader check."
+		return 0
+	fi
+
+	echo "############################################################################"
+	echo "Checking this TPC host is the Patroni leader"
+	echo "############################################################################"
+	echo "Patroni yaml: $yaml"
+
+	json=$(_patroni_list_json "$yaml" || true)
+	if [ -z "$json" ]; then
+		echo "ERROR: Patroni is present but patronictl list failed. Cannot verify this host is the leader."
+		exit 1
+	fi
+
+	pair=$(printf '%s\n' "$json" | _patroni_leader_ident || true)
+	leader_member=$(echo "$pair" | awk -F'|' '{print $1}')
+	leader_host=$(echo "$pair" | awk -F'|' '{print $2}')
+	tpc_host=$(hostname -s 2>/dev/null || hostname)
+
+	if [ -z "$leader_member" ] && [ -z "$leader_host" ]; then
+		echo "ERROR: Patroni cluster has no Leader."
+		exit 1
+	fi
+
+	if is_local_host "$leader_member" || is_local_host "$leader_host" || _tpc_has_local_ip "$leader_host"; then
+		echo "TPC host $tpc_host is Patroni leader (${leader_member:-$leader_host})."
+		echo ""
+		return 0
+	fi
+
+	echo "ERROR: TPC Host $tpc_host is not a leader in Patroni cluster. Switchover to $tpc_host."
+	echo "Current Patroni leader: ${leader_member:-$leader_host}"
+	exit 1
+}
+
 _pgconfig_wait_postgres()
 {
 	local i

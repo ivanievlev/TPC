@@ -169,7 +169,8 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 
 	``Empty (default): libpq uses a Unix socket /tmp/.s.PGSQL.<PGPORT> — this is Postgres or PgBouncer, not HAProxy.
 	HAProxy listens on TCP only. To send load through HAProxy set PGHOST="127.0.0.1" and the matching PGPORT_WRITE / PGPORT_SELECT.
-	Use 127.0.0.1 (not localhost) so the client does not fall back to a Unix socket.``
+	Use 127.0.0.1 (not localhost) so the client does not fall back to a Unix socket.
+	If Patroni is present, rollout.sh must run on the current leader (server-side COPY FROM reads files on the Postgres primary). Otherwise it exits: TPC Host <this> is not a leader in Patroni cluster. Switchover to <this>.``
 
 - RUN_SQL_FROM_ROLE="postgres"
 
