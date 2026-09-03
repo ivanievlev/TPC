@@ -2,117 +2,117 @@
 -- dsqgen uses only the first whitespace-separated field as the template filename.
 -- Extra columns are labels for reports (06/08 "query label") and for interpreting results.
 -- More labels => typically harder for the engine. Vocabulary:
---   Join-ordering        5+ tables; join order is critical
---   Fact-fact-join       sales⋈returns or other fact-fact joins (intermediate explosion)
---   Cross-channel        store + catalog and/or web in one statement
---   Multi-statement      template emits more than one SQL statement
---   Disjunctive-filter   OR of ranges/predicates that hurt join selectivity
---   Inequality-join      non-equi join predicates (<, >)
---   Correlated-subquery  subquery references outer query columns
---   Nested-loop-risk     correlated/EXISTS/IN shape often executed as nested loops (Postgres)
---   Anti-semi-Join       EXISTS, NOT EXISTS, IN (subquery), INTERSECT, EXCEPT
---   RAM-bound            windows, ROLLUP/CUBE, DISTINCT, set ops, large hash/sort
---   Spill-bound          high chance of temp/spill (hash agg/join of large facts)
---   CPU-bound            CASE / arithmetic / SUBSTR / many scalar subqueries
---   IO-bound             large fact scan
+--   Joins   5+ tables; join order is critical
+--   F2F     sales⋈returns or other fact-fact joins (intermediate explosion)
+--   CrCh    store + catalog and/or web in one statement
+--   Multi   template emits more than one SQL statement
+--   Disj    OR of ranges/predicates that hurt join selectivity
+--   Ineq    non-equi join predicates (<, >)
+--   Subq    subquery references outer query columns
+--   NL      correlated/EXISTS/IN shape often executed as nested loops (Postgres)
+--   Anti    EXISTS, NOT EXISTS, IN (subquery), INTERSECT, EXCEPT
+--   RAM     windows, ROLLUP/CUBE, DISTINCT, set ops, large hash/sort
+--   Spill   high chance of temp/spill (hash agg/join of large facts)
+--   CPU     CASE / arithmetic / SUBSTR / many scalar subqueries
+--   IO      large fact scan
 --
 -- filename	labels
-query1.tpl	Correlated-subquery,Nested-loop-risk,RAM-bound,IO-bound
-query2.tpl	Cross-channel,RAM-bound,Spill-bound,CPU-bound
-query3.tpl	IO-bound,CPU-bound
-query4.tpl	Cross-channel,Join-ordering,RAM-bound,Spill-bound,CPU-bound
-query5.tpl	Cross-channel,Join-ordering,Fact-fact-join,RAM-bound,Spill-bound
-query6.tpl	Join-ordering,RAM-bound,IO-bound
-query7.tpl	Join-ordering,IO-bound
-query8.tpl	Anti-semi-Join,RAM-bound,CPU-bound,IO-bound
-query9.tpl	CPU-bound,IO-bound,Spill-bound
-query10.tpl	Cross-channel,Join-ordering,Anti-semi-Join,Correlated-subquery,Nested-loop-risk,Spill-bound
-query11.tpl	Cross-channel,RAM-bound,Spill-bound
-query12.tpl	RAM-bound,IO-bound
-query13.tpl	Join-ordering,Disjunctive-filter,CPU-bound,IO-bound
-query14.tpl	Cross-channel,Multi-statement,Join-ordering,Anti-semi-Join,RAM-bound,Spill-bound
-query15.tpl	CPU-bound,IO-bound
-query16.tpl	Fact-fact-join,Anti-semi-Join,Correlated-subquery,Nested-loop-risk,RAM-bound,Spill-bound
-query17.tpl	Join-ordering,Fact-fact-join,Spill-bound,IO-bound
-query18.tpl	Join-ordering,RAM-bound,Spill-bound
-query19.tpl	Join-ordering,CPU-bound,IO-bound
-query20.tpl	RAM-bound,IO-bound
-query21.tpl	Inequality-join,CPU-bound,IO-bound
-query22.tpl	RAM-bound,Spill-bound,IO-bound
-query23.tpl	Cross-channel,Multi-statement,Join-ordering,Anti-semi-Join,RAM-bound,Spill-bound,CPU-bound
-query24.tpl	Multi-statement,Join-ordering,Fact-fact-join,RAM-bound,Spill-bound
-query25.tpl	Join-ordering,Fact-fact-join,Spill-bound,IO-bound
-query26.tpl	Join-ordering,IO-bound
-query27.tpl	Join-ordering,RAM-bound,IO-bound
-query28.tpl	RAM-bound,Spill-bound,IO-bound
-query29.tpl	Join-ordering,Fact-fact-join,Spill-bound,IO-bound
-query30.tpl	Correlated-subquery,Nested-loop-risk,RAM-bound,IO-bound
-query31.tpl	Cross-channel,RAM-bound,Spill-bound,CPU-bound
-query32.tpl	RAM-bound,IO-bound
-query33.tpl	Cross-channel,Join-ordering,Anti-semi-Join,RAM-bound,Spill-bound
-query34.tpl	Disjunctive-filter,CPU-bound,RAM-bound,IO-bound
-query35.tpl	Cross-channel,Join-ordering,Anti-semi-Join,Correlated-subquery,Nested-loop-risk,RAM-bound,Spill-bound
-query36.tpl	RAM-bound,Spill-bound,IO-bound
-query37.tpl	Fact-fact-join,IO-bound
-query38.tpl	Cross-channel,Anti-semi-Join,RAM-bound,Spill-bound
-query39.tpl	Multi-statement,RAM-bound,Spill-bound,CPU-bound
-query40.tpl	Join-ordering,Fact-fact-join,CPU-bound,IO-bound
-query41.tpl	Correlated-subquery,Nested-loop-risk,Disjunctive-filter,RAM-bound,CPU-bound
-query42.tpl	IO-bound
-query43.tpl	CPU-bound,IO-bound
-query44.tpl	RAM-bound,Spill-bound,IO-bound
-query45.tpl	Join-ordering,Anti-semi-Join,CPU-bound,IO-bound
-query46.tpl	RAM-bound,Spill-bound,IO-bound
-query47.tpl	Join-ordering,RAM-bound,Spill-bound
-query48.tpl	Join-ordering,Disjunctive-filter,CPU-bound,IO-bound
-query49.tpl	Cross-channel,Join-ordering,Fact-fact-join,RAM-bound,Spill-bound
-query50.tpl	Fact-fact-join,CPU-bound,Spill-bound,IO-bound
-query51.tpl	Cross-channel,Join-ordering,RAM-bound,Spill-bound
-query52.tpl	IO-bound
-query53.tpl	Disjunctive-filter,RAM-bound,IO-bound
-query54.tpl	Cross-channel,Join-ordering,RAM-bound,Spill-bound
-query55.tpl	IO-bound
-query56.tpl	Cross-channel,Join-ordering,Anti-semi-Join,RAM-bound,Spill-bound
-query57.tpl	Join-ordering,RAM-bound,Spill-bound
-query58.tpl	Cross-channel,Join-ordering,Anti-semi-Join,RAM-bound,Spill-bound
-query59.tpl	RAM-bound,Spill-bound,CPU-bound
-query60.tpl	Cross-channel,Join-ordering,Anti-semi-Join,RAM-bound,Spill-bound
-query61.tpl	Join-ordering,CPU-bound,IO-bound
-query62.tpl	Join-ordering,CPU-bound,IO-bound
-query63.tpl	RAM-bound,IO-bound
-query64.tpl	Join-ordering,Fact-fact-join,RAM-bound,Spill-bound,CPU-bound
-query65.tpl	RAM-bound,Spill-bound,IO-bound
-query66.tpl	Cross-channel,Join-ordering,CPU-bound,RAM-bound,Spill-bound
-query67.tpl	RAM-bound,Spill-bound,IO-bound
-query68.tpl	RAM-bound,IO-bound
-query69.tpl	Cross-channel,Join-ordering,Anti-semi-Join,Correlated-subquery,Nested-loop-risk,Spill-bound
-query70.tpl	Anti-semi-Join,RAM-bound,Spill-bound
-query71.tpl	Cross-channel,RAM-bound,IO-bound
-query72.tpl	Join-ordering,Fact-fact-join,Inequality-join,Anti-semi-Join,CPU-bound,Spill-bound
-query73.tpl	RAM-bound,IO-bound
-query74.tpl	Cross-channel,RAM-bound,Spill-bound
-query75.tpl	Cross-channel,Join-ordering,Fact-fact-join,RAM-bound,Spill-bound
-query76.tpl	Cross-channel,RAM-bound,Spill-bound
-query77.tpl	Cross-channel,Join-ordering,Fact-fact-join,RAM-bound,Spill-bound
-query78.tpl	Cross-channel,Join-ordering,Fact-fact-join,Anti-semi-Join,RAM-bound,Spill-bound
-query79.tpl	CPU-bound,Spill-bound,IO-bound
-query80.tpl	Cross-channel,Join-ordering,Fact-fact-join,RAM-bound,Spill-bound
-query81.tpl	Correlated-subquery,Nested-loop-risk,RAM-bound,IO-bound
-query82.tpl	Fact-fact-join,Spill-bound,IO-bound
-query83.tpl	Cross-channel,Join-ordering,Anti-semi-Join,RAM-bound
-query84.tpl	Join-ordering,IO-bound
-query85.tpl	Join-ordering,Fact-fact-join,Disjunctive-filter,CPU-bound,RAM-bound,Spill-bound,IO-bound
-query86.tpl	RAM-bound,IO-bound
-query87.tpl	Cross-channel,Anti-semi-Join,RAM-bound,Spill-bound
-query88.tpl	Disjunctive-filter,CPU-bound,IO-bound,Spill-bound
-query89.tpl	RAM-bound,IO-bound
-query90.tpl	RAM-bound,IO-bound
-query91.tpl	Join-ordering,IO-bound
-query92.tpl	RAM-bound,IO-bound
-query93.tpl	Fact-fact-join,CPU-bound,Spill-bound,IO-bound
-query94.tpl	Fact-fact-join,Anti-semi-Join,Correlated-subquery,Nested-loop-risk,RAM-bound,Spill-bound
-query95.tpl	Fact-fact-join,Anti-semi-Join,RAM-bound,Spill-bound
-query96.tpl	IO-bound,Spill-bound
-query97.tpl	Cross-channel,RAM-bound,CPU-bound,Spill-bound
-query98.tpl	RAM-bound,IO-bound
-query99.tpl	Join-ordering,CPU-bound,Spill-bound,IO-bound
+query1.tpl	Subq,NL,RAM,IO
+query2.tpl	CrCh,RAM,Spill,CPU
+query3.tpl	IO,CPU
+query4.tpl	CrCh,Joins,RAM,Spill,CPU
+query5.tpl	CrCh,Joins,F2F,RAM,Spill
+query6.tpl	Joins,RAM,IO
+query7.tpl	Joins,IO
+query8.tpl	Anti,RAM,CPU,IO
+query9.tpl	CPU,IO,Spill
+query10.tpl	CrCh,Joins,Anti,Subq,NL,Spill
+query11.tpl	CrCh,RAM,Spill
+query12.tpl	RAM,IO
+query13.tpl	Joins,Disj,CPU,IO
+query14.tpl	CrCh,Multi,Joins,Anti,RAM,Spill
+query15.tpl	CPU,IO
+query16.tpl	F2F,Anti,Subq,NL,RAM,Spill
+query17.tpl	Joins,F2F,Spill,IO
+query18.tpl	Joins,RAM,Spill
+query19.tpl	Joins,CPU,IO
+query20.tpl	RAM,IO
+query21.tpl	Ineq,CPU,IO
+query22.tpl	RAM,Spill,IO
+query23.tpl	CrCh,Multi,Joins,Anti,RAM,Spill,CPU
+query24.tpl	Multi,Joins,F2F,RAM,Spill
+query25.tpl	Joins,F2F,Spill,IO
+query26.tpl	Joins,IO
+query27.tpl	Joins,RAM,IO
+query28.tpl	RAM,Spill,IO
+query29.tpl	Joins,F2F,Spill,IO
+query30.tpl	Subq,NL,RAM,IO
+query31.tpl	CrCh,RAM,Spill,CPU
+query32.tpl	RAM,IO
+query33.tpl	CrCh,Joins,Anti,RAM,Spill
+query34.tpl	Disj,CPU,RAM,IO
+query35.tpl	CrCh,Joins,Anti,Subq,NL,RAM,Spill
+query36.tpl	RAM,Spill,IO
+query37.tpl	F2F,IO
+query38.tpl	CrCh,Anti,RAM,Spill
+query39.tpl	Multi,RAM,Spill,CPU
+query40.tpl	Joins,F2F,CPU,IO
+query41.tpl	Subq,NL,Disj,RAM,CPU
+query42.tpl	IO
+query43.tpl	CPU,IO
+query44.tpl	RAM,Spill,IO
+query45.tpl	Joins,Anti,CPU,IO
+query46.tpl	RAM,Spill,IO
+query47.tpl	Joins,RAM,Spill
+query48.tpl	Joins,Disj,CPU,IO
+query49.tpl	CrCh,Joins,F2F,RAM,Spill
+query50.tpl	F2F,CPU,Spill,IO
+query51.tpl	CrCh,Joins,RAM,Spill
+query52.tpl	IO
+query53.tpl	Disj,RAM,IO
+query54.tpl	CrCh,Joins,RAM,Spill
+query55.tpl	IO
+query56.tpl	CrCh,Joins,Anti,RAM,Spill
+query57.tpl	Joins,RAM,Spill
+query58.tpl	CrCh,Joins,Anti,RAM,Spill
+query59.tpl	RAM,Spill,CPU
+query60.tpl	CrCh,Joins,Anti,RAM,Spill
+query61.tpl	Joins,CPU,IO
+query62.tpl	Joins,CPU,IO
+query63.tpl	RAM,IO
+query64.tpl	Joins,F2F,RAM,Spill,CPU
+query65.tpl	RAM,Spill,IO
+query66.tpl	CrCh,Joins,CPU,RAM,Spill
+query67.tpl	RAM,Spill,IO
+query68.tpl	RAM,IO
+query69.tpl	CrCh,Joins,Anti,Subq,NL,Spill
+query70.tpl	Anti,RAM,Spill
+query71.tpl	CrCh,RAM,IO
+query72.tpl	Joins,F2F,Ineq,Anti,CPU,Spill
+query73.tpl	RAM,IO
+query74.tpl	CrCh,RAM,Spill
+query75.tpl	CrCh,Joins,F2F,RAM,Spill
+query76.tpl	CrCh,RAM,Spill
+query77.tpl	CrCh,Joins,F2F,RAM,Spill
+query78.tpl	CrCh,Joins,F2F,Anti,RAM,Spill
+query79.tpl	CPU,Spill,IO
+query80.tpl	CrCh,Joins,F2F,RAM,Spill
+query81.tpl	Subq,NL,RAM,IO
+query82.tpl	F2F,Spill,IO
+query83.tpl	CrCh,Joins,Anti,RAM
+query84.tpl	Joins,IO
+query85.tpl	Joins,F2F,Disj,CPU,RAM,Spill,IO
+query86.tpl	RAM,IO
+query87.tpl	CrCh,Anti,RAM,Spill
+query88.tpl	Disj,CPU,IO,Spill
+query89.tpl	RAM,IO
+query90.tpl	RAM,IO
+query91.tpl	Joins,IO
+query92.tpl	RAM,IO
+query93.tpl	F2F,CPU,Spill,IO
+query94.tpl	F2F,Anti,Subq,NL,RAM,Spill
+query95.tpl	F2F,Anti,RAM,Spill
+query96.tpl	IO,Spill
+query97.tpl	CrCh,RAM,CPU,Spill
+query98.tpl	RAM,IO
+query99.tpl	Joins,CPU,Spill,IO

@@ -1,36 +1,36 @@
 -- TPC-H query templates (qgen .sql) and complexity labels (tab-separated).
 -- qgen does not read this file; it is the label source for 06/08 reports.
 -- More labels => typically harder for the engine. Vocabulary:
---   Join-ordering        5+ tables; join order is critical
---   Disjunctive-filter   OR of brand/container/qty ranges
---   Correlated-subquery  subquery references outer query columns
---   Nested-loop-risk     correlated/EXISTS/IN shape often executed as nested loops (Postgres)
---   Anti-semi-Join       EXISTS, NOT EXISTS, IN (subquery)
---   RAM-bound            DISTINCT, large GROUP BY / hash agg / sort
---   Spill-bound          high chance of temp/spill on large lineitem joins/aggs
---   CPU-bound            CASE / arithmetic / SUBSTR / LIKE
---   IO-bound             large fact (lineitem) scan
+--   Joins   5+ tables; join order is critical
+--   Disj    OR of brand/container/qty ranges
+--   Subq    subquery references outer query columns
+--   NL      correlated/EXISTS/IN shape often executed as nested loops (Postgres)
+--   Anti    EXISTS, NOT EXISTS, IN (subquery)
+--   RAM     DISTINCT, large GROUP BY / hash agg / sort
+--   Spill   high chance of temp/spill on large lineitem joins/aggs
+--   CPU     CASE / arithmetic / SUBSTR / LIKE
+--   IO      large fact (lineitem) scan
 --
 -- filename	labels
-1.sql	IO-bound,CPU-bound
-2.sql	Join-ordering,Correlated-subquery,Nested-loop-risk,CPU-bound
-3.sql	IO-bound,RAM-bound
-4.sql	Correlated-subquery,Anti-semi-Join,Nested-loop-risk,IO-bound
-5.sql	Join-ordering,IO-bound,RAM-bound
-6.sql	IO-bound,CPU-bound
-7.sql	Join-ordering,CPU-bound,RAM-bound,IO-bound
-8.sql	Join-ordering,CPU-bound,RAM-bound
-9.sql	Join-ordering,IO-bound,Spill-bound,RAM-bound
-10.sql	IO-bound,RAM-bound
-11.sql	Correlated-subquery,RAM-bound,CPU-bound
-12.sql	CPU-bound,IO-bound
-13.sql	RAM-bound,CPU-bound,Spill-bound
-14.sql	CPU-bound,IO-bound
-15.sql	RAM-bound,IO-bound,CPU-bound
-16.sql	Anti-semi-Join,RAM-bound,CPU-bound
-17.sql	Correlated-subquery,Nested-loop-risk,Anti-semi-Join,RAM-bound,Spill-bound
-18.sql	Anti-semi-Join,RAM-bound,Spill-bound,IO-bound
-19.sql	Disjunctive-filter,CPU-bound,IO-bound
-20.sql	Correlated-subquery,Nested-loop-risk,Anti-semi-Join,RAM-bound,Spill-bound,IO-bound
-21.sql	Correlated-subquery,Nested-loop-risk,Anti-semi-Join,Spill-bound,RAM-bound,IO-bound
-22.sql	Anti-semi-Join,CPU-bound,RAM-bound
+1.sql	IO,CPU
+2.sql	Joins,Subq,NL,CPU
+3.sql	IO,RAM
+4.sql	Subq,Anti,NL,IO
+5.sql	Joins,IO,RAM
+6.sql	IO,CPU
+7.sql	Joins,CPU,RAM,IO
+8.sql	Joins,CPU,RAM
+9.sql	Joins,IO,Spill,RAM
+10.sql	IO,RAM
+11.sql	Subq,RAM,CPU
+12.sql	CPU,IO
+13.sql	RAM,CPU,Spill
+14.sql	CPU,IO
+15.sql	RAM,IO,CPU
+16.sql	Anti,RAM,CPU
+17.sql	Subq,NL,Anti,RAM,Spill
+18.sql	Anti,RAM,Spill,IO
+19.sql	Disj,CPU,IO
+20.sql	Subq,NL,Anti,RAM,Spill,IO
+21.sql	Subq,NL,Anti,Spill,RAM,IO
+22.sql	Anti,CPU,RAM
