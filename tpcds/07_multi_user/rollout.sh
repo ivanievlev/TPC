@@ -74,6 +74,8 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 		#sed -i "s/tpcdsquery/${MULTI_USER_COUNT}_/g"  $sql_dir/*.sql
 	done
 
+	init_query_run_progress $((MULTI_USER_COUNT * $(count_planned_sql_queries_per_stream)))
+
 	session_pids=()
 	for x in $(seq 1 $MULTI_USER_COUNT); do
 		session_log=$PWD/../../log/testing_session_log/testing_session_$x.log

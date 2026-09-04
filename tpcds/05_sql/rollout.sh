@@ -60,64 +60,18 @@ for i in $(ls $PWD/*.tpcds.*.sql); do
 		echo "Skipping $qnum due to $(_tpc_skip_list_var_name)=${SKIP_QUERIES_LIST}."
 		continue
 	fi
-	if [ "$EXCLUDE_HEAVY_QUERIES" == "true" ]; then
-
-		if [[ 
-		"$qnum" == "02" ||
-		"$qnum" == "04" ||
-		"$qnum" == "05" ||
-		"$qnum" == "09" ||
-		"$qnum" == "10" ||
-		"$qnum" == "11" ||
-		"$qnum" == "14" ||
-		"$qnum" == "16" ||
-		"$qnum" == "17" ||
-		"$qnum" == "18" ||
-		"$qnum" == "22" ||
-		"$qnum" == "23" ||
-		"$qnum" == "24" ||
-		"$qnum" == "25" ||
-		"$qnum" == "28" ||
-		"$qnum" == "29" ||
-		"$qnum" == "31" ||
-		"$qnum" == "35" ||
-		"$qnum" == "36" ||
-		"$qnum" == "38" ||
-		"$qnum" == "39" ||
-		"$qnum" == "44" ||
-		"$qnum" == "46" ||
-		"$qnum" == "47" ||
-		"$qnum" == "50" ||
-		"$qnum" == "51" ||
-		"$qnum" == "57" ||
-		"$qnum" == "59" ||
-		"$qnum" == "64" ||
-		"$qnum" == "65" ||
-		"$qnum" == "67" ||
-		"$qnum" == "70" ||
-		"$qnum" == "72" ||
-		"$qnum" == "74" ||
-		"$qnum" == "75" ||
-		"$qnum" == "76" ||
-		"$qnum" == "78" ||
-		"$qnum" == "79" ||
-		"$qnum" == "80" ||
-		"$qnum" == "82" ||
-		"$qnum" == "87" ||
-		"$qnum" == "88" ||
-		"$qnum" == "93" ||
-		"$qnum" == "94" ||
-		"$qnum" == "95" ||
-		"$qnum" == "96" ||
-		"$qnum" == "97" ||
-		"$qnum" == "99" ]]; then
-
-			echo "Skipping $qnum due to EXCLUDE_HEAVY_QUERIES=true."
+	if should_exclude_heavy_tpcds_query "$qnum"; then
+		echo "Skipping $qnum due to EXCLUDE_HEAVY_QUERIES=true."
 		continue
-		fi
 	fi
 	sql_file_list="$sql_file_list $i"
 done
+
+nfiles=0
+for _qf in $sql_file_list; do
+	nfiles=$((nfiles + 1))
+done
+init_query_run_progress $((SINGLE_USER_ITERATIONS * nfiles))
 
 for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
 	echo "SQL iteration $x of $SINGLE_USER_ITERATIONS"

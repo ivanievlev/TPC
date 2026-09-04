@@ -328,6 +328,84 @@ should_skip_tpcds_query()
 	return 1
 }
 
+# TPC-DS only. Return 0 if EXCLUDE_HEAVY_QUERIES=true and $1 is a heavy query id.
+should_exclude_heavy_tpcds_query()
+{
+	local qnum="$1"
+	local q
+	[ "${EXCLUDE_HEAVY_QUERIES:-false}" = "true" ] || return 1
+	[ "${TPC_MODE:-TPC-DS}" = "TPC-DS" ] || return 1
+	if ! [[ "$qnum" =~ ^[0-9]+$ ]]; then
+		return 1
+	fi
+	q=$((10#$qnum))
+	case "$q" in
+		2|4|5|9|10|11|14|16|17|18|22|23|24|25|28|29|31|35|36|38|39|44|46|47|50|51|57|59|64|65|67|70|72|74|75|76|78|79|80|82|87|88|93|94|95|96|97|99) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# Queries one 05/07 stream will actually run (skip list + TPC-DS heavy filter).
+count_planned_sql_queries_per_stream()
+{
+	local max="${TPC_QUERY_ID_MAX:-99}"
+	local q n=0
+	for q in $(seq 1 "$max"); do
+		if should_skip_tpcds_query "$q"; then
+			continue
+		fi
+		if should_exclude_heavy_tpcds_query "$q"; then
+			continue
+		fi
+		n=$((n + 1))
+	done
+	echo "$n"
+}
+
+# Shared 05/07 query counter. $1 = total queries in this run (single or multi-user).
+init_query_run_progress()
+{
+	local total="${1:-0}"
+	ensure_log_dirs
+	TPC_QUERY_PROGRESS_FILE="${LOCAL_PWD}/log/.query_run_progress"
+	if ! [[ "$total" =~ ^[0-9]+$ ]] || [ "$total" -le 0 ]; then
+		rm -f "$TPC_QUERY_PROGRESS_FILE" "${TPC_QUERY_PROGRESS_FILE}.lock"
+		unset TPC_QUERY_PROGRESS_FILE
+		return 0
+	fi
+	printf '0 %s\n' "$total" > "$TPC_QUERY_PROGRESS_FILE"
+	export TPC_QUERY_PROGRESS_FILE
+}
+
+# Increment completed queries; set QUERY_PROGRESS_PCT to "N%" (integer, rounded).
+tick_query_run_progress()
+{
+	local file="${TPC_QUERY_PROGRESS_FILE:-}"
+	local lock pct
+	QUERY_PROGRESS_PCT=""
+	[ -n "$file" ] && [ -f "$file" ] || return 0
+	lock="${file}.lock"
+	pct=$(
+		if command -v flock >/dev/null 2>&1; then
+			exec 9>"$lock"
+			flock 9
+		fi
+		n_done=0
+		n_total=0
+		read -r n_done n_total < "$file" || true
+		if ! [[ "$n_done" =~ ^[0-9]+$ ]]; then n_done=0; fi
+		if ! [[ "$n_total" =~ ^[0-9]+$ ]]; then n_total=0; fi
+		n_done=$((n_done + 1))
+		printf '%s %s\n' "$n_done" "$n_total" > "$file"
+		if [ "$n_total" -gt 0 ]; then
+			awk -v d="$n_done" -v t="$n_total" 'BEGIN { p=int(d * 100 / t + 0.5); if (d >= t) p=100; if (p > 100) p=100; if (p < 0) p=0; print p }'
+		fi
+	)
+	if [ -n "$pct" ]; then
+		QUERY_PROGRESS_PCT="${pct}%"
+	fi
+}
+
 get_version()
 {
 	#need to call source_bashrc first
@@ -479,13 +557,23 @@ log()
 
 	# Prefer path from init_log; fall back to log/ for callers that set logfile only.
 	local out_file="${STEP_ROLLOUT_LOGFILE:-$LOCAL_PWD/log/$logfile}"
+	local line
 
 	# Optional 6th/7th fields for SQL reports (query_status, backend_host).
+	# 8th field (N%) is stdout-only progress of this 05 or 07 run; omitted from COPY files.
 	if [ -n "${QUERY_STATUS:-}" ]; then
 		qs=$(printf '%s' "$QUERY_STATUS" | tr '|\n\r\t' '    ' | sed 's/  */ /g' | head -c 500)
 		bh=$(printf '%s' "${QUERY_BACKEND_HOST:-unknown}" | tr '|\n\r\t' '    ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -c 200)
 		[ -z "$bh" ] && bh="unknown"
-		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d|%s|%s\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" "$qs" "$bh" | tee -a "$out_file"
+		line=$(printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d|%s|%s" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" "$qs" "$bh")
+		tick_query_run_progress
+		if [ -n "${QUERY_PROGRESS_PCT:-}" ]; then
+			printf '%s|%s\n' "$line" "$QUERY_PROGRESS_PCT"
+			unset QUERY_PROGRESS_PCT
+		else
+			printf '%s\n' "$line"
+		fi
+		printf '%s\n' "$line" >> "$out_file"
 	else
 		printf "$timing|$id|$schema_name.$table_name|$tuples|%02d:%02d:%02d.%03d\n" "$((S/3600%24))" "$((S/60%60))" "$((S%60))" "${M}" | tee -a "$out_file"
 	fi
@@ -660,8 +748,9 @@ normalize_single_explain_analyze_mode()
 	esac
 }
 
-# One 05_sql file. Uses caller $i (path), schema_name, table_name. Duration is the SELECT
-# (or EXPLAIN ANALYZE in analyze mode); EXPLAIN-only is not timed.
+# One 05_sql file. Uses caller $i (path), schema_name, table_name.
+# analyze: timed EXPLAIN ANALYZE. explain: EXPLAIN+SELECT in one transaction (timed).
+# empty/false: timed SELECT.
 run_05_sql_query_file()
 {
 	local sql_outfile sql_errfile hostfile psql_rc myfilename mylogfile mode
@@ -691,23 +780,10 @@ run_05_sql_query_file()
 			sql_exit_if_query_error "$sql_outfile" "$sql_errfile" "$hostfile"
 			;;
 		explain)
-			echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN\" -f $i > $mylogfile"
-			set +e
-			psql_run_sql_capturing_host "$i" "$mylogfile" "$sql_errfile" "$hostfile" "EXPLAIN"
-			psql_rc=$?
-			set -e
-			if [ -s "$sql_errfile" ]; then
-				cat "$sql_errfile" >&2
-			fi
-			QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
-			sql_exit_if_query_error "$sql_outfile" "$sql_errfile" "$hostfile"
-			: > "$sql_outfile"
-			: > "$sql_errfile"
-			: > "$hostfile"
 			start_log
 			echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
 			set +e
-			psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" ""
+			psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" "" "$mylogfile"
 			psql_rc=$?
 			set -e
 			if [ -s "$sql_errfile" ]; then
@@ -819,14 +895,14 @@ append_duckdb_session_sets()
 }
 
 # Run a TPC query file in one psql session and record the backend hostname.
-# A second connection (HAProxy/PgBouncer round-robin) would hit another node,
-# so the probe must share the session with the workload. Hostname is read from
-# the server OS because PgBouncer often uses a unix socket (inet_server_addr
-# is then NULL). Must not CREATE TEMP TABLE: standbys are read-only.
+# Hostname probe and workload share the session (HAProxy/PgBouncer round-robin).
+# Hostname is read from the server OS because PgBouncer often uses a unix socket
+# (inet_server_addr is then NULL). Must not CREATE TEMP TABLE: standbys are read-only.
 # DuckDB SET must come after the probe (PSQL_SESSION_SETS). Only force_execution
 # is per-session; memory/threads are ALTER DATABASE in 02_init.
 #
 # $1 SQL file  $2 stdout  $3 stderr  $4 host file  $5 EXPLAIN_ANALYZE value
+# $6 optional: if set, BEGIN + EXPLAIN (plan → this path) + SELECT + COMMIT in one session.
 # Uses: DBNAME, PSQL_SESSION_SETS, ON_ERROR_STOP, RUN_SQL_FROM_ROLE (optional).
 # Sets QUERY_BACKEND_HOST. Returns psql exit code.
 psql_run_sql_capturing_host()
@@ -836,11 +912,25 @@ psql_run_sql_capturing_host()
 	local stderr_file=$3
 	local host_file=$4
 	local explain_val=$5
-	local wrapper rc
+	local explain_plan_file=${6:-}
+	local wrapper rc sql_body
 	local role_opts=()
 
 	: > "$host_file"
 	wrapper=$(mktemp)
+	if [ -n "$explain_plan_file" ]; then
+		: > "$explain_plan_file"
+		sql_body="BEGIN;
+\\o $explain_plan_file
+\\set EXPLAIN_ANALYZE EXPLAIN
+\\i $sql_file
+\\o
+\\set EXPLAIN_ANALYZE ''
+\\i $sql_file
+COMMIT;"
+	else
+		sql_body="\\i $sql_file"
+	fi
 	# Standbys reject CREATE TEMP TABLE. Session GUCs via set_config are allowed.
 	cat > "$wrapper" <<EOSQL
 DO \$\$
@@ -877,7 +967,7 @@ END
 SELECT current_setting('tpc.backend_host', true);
 \\o
 $PSQL_SESSION_SETS
-\\i $sql_file
+$sql_body
 EOSQL
 
 	if [ -n "${RUN_SQL_FROM_ROLE:-}" ]; then
@@ -1228,13 +1318,18 @@ ensure_rollout_log_for_copy()
 }
 
 # SQL logs gained a 7th field (backend_host). Pad legacy 6-field lines so COPY still works.
+# Drop a trailing N% progress field if a log was captured from stdout.
 pad_sql_log_backend_host()
 {
 	local logfile="$1"
 	local tmp
 	[ -f "$logfile" ] && [ -s "$logfile" ] || return 0
 	tmp=$(mktemp)
-	awk -F'|' 'NF==6 { print $0 "|unknown"; next } { print }' "$logfile" > "$tmp" && mv "$tmp" "$logfile"
+	awk -F'|' '
+		NF>=8 && $NF ~ /^[0-9]+%$/ { print $1 "|" $2 "|" $3 "|" $4 "|" $5 "|" $6 "|" $7; next }
+		NF==6 { print $0 "|unknown"; next }
+		{ print }
+	' "$logfile" > "$tmp" && mv "$tmp" "$logfile"
 	chmod a+r "$logfile" 2>/dev/null || true
 }
 

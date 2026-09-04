@@ -47,6 +47,12 @@ for i in $(ls $PWD/*.tpch.*.sql); do
 	sql_file_list="$sql_file_list $i"
 done
 
+nfiles=0
+for _qf in $sql_file_list; do
+	nfiles=$((nfiles + 1))
+done
+init_query_run_progress $((SINGLE_USER_ITERATIONS * nfiles))
+
 for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
 	echo "SQL iteration $x of $SINGLE_USER_ITERATIONS"
 	drop_os_page_cache_before_sql_iteration "$x" || exit 1
