@@ -8,8 +8,8 @@ source $PWD/../../parse_step_args.sh
 source $PWD/../../mode.sh
 init_tpc_mode
 
-if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
-	echo "Missing required parameters from tpc_variables.sh (scale, explain, random, multi-user, iterations)."
+if [[ "$GEN_DATA_SCALE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$SINGLE_USER_ITERATIONS" == "" ]]; then
+	echo "Missing required parameters from tpc_variables.sh (scale, random, multi-user, iterations)."
 	exit 1
 fi
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
@@ -20,6 +20,7 @@ init_log $step
 echo "SQL_ON_ERROR_STOP = $SQL_ON_ERROR_STOP"
 echo "STATEMENT_TIMEOUT = $STATEMENT_TIMEOUT"
 echo "SINGLE_USER_ITERATIONS = $SINGLE_USER_ITERATIONS"
+echo "SINGLE_EXPLAIN_ANALYZE_MODE = $SINGLE_EXPLAIN_ANALYZE_MODE"
 echo "DROP_CACHE_BEFORE_SQL = $DROP_CACHE_BEFORE_SQL"
 echo "RUN_SQL_WITH_DUCKDB = $RUN_SQL_WITH_DUCKDB"
 echo "DUCKDB_MEMORY_LIMIT = $DUCKDB_MEMORY_LIMIT"
@@ -126,40 +127,7 @@ for x in $(seq 1 $SINGLE_USER_ITERATIONS); do
 		schema_name=`echo $i | awk -F '.' '{print $2}'`
 		# description = schema.query.iteration so SCORE can split 05_sql passes
 		table_name="$(echo $i | awk -F '.' '{print $3}').${x}"
-		start_log
-		sql_outfile=$(mktemp)
-		sql_errfile=$(mktemp)
-		hostfile=$(mktemp)
-		psql_rc=0
-		if [ "$EXPLAIN_ANALYZE" == "false" ]; then
-			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
-			set +e
-			psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" ""
-			psql_rc=$?
-			set -e
-			# Keep stderr visible in the step log (same as before when psql wrote to the terminal).
-			if [ -s "$sql_errfile" ]; then
-				cat "$sql_errfile" >&2
-			fi
-			tuples=$(wc -l < "$sql_outfile" | tr -d ' ')
-		else
-			myfilename=$(basename $i)
-			mylogfile=$PWD/../../log/single_explain_analyze_log/$myfilename.single.explain_analyze.log
-			echo "psql -d $DBNAME -U $RUN_SQL_FROM_ROLE -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
-			set +e
-			psql_run_sql_capturing_host "$i" "$mylogfile" "$sql_errfile" "$hostfile" "EXPLAIN ANALYZE"
-			psql_rc=$?
-			set -e
-			if [ -s "$sql_errfile" ]; then
-				cat "$sql_errfile" >&2
-			fi
-			tuples=$(tuples_from_explain_log "$mylogfile")
-		fi
-		QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
-		log $tuples
-		sql_exit_if_query_error "$sql_outfile" "$sql_errfile" "$hostfile"
-		unset QUERY_STATUS QUERY_BACKEND_HOST
-		rm -f "$sql_outfile" "$sql_errfile" "$hostfile"
+		run_05_sql_query_file
 	done
 done
 

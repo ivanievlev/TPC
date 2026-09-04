@@ -44,6 +44,9 @@ fi
 if [ -z "$DROP_CACHE_BEFORE_SQL" ]; then
 	DROP_CACHE_BEFORE_SQL="false"
 fi
+if type normalize_single_explain_analyze_mode >/dev/null 2>&1; then
+	normalize_single_explain_analyze_mode
+fi
 if [ -z "$STATEMENT_TIMEOUT" ]; then
 	STATEMENT_TIMEOUT="1h"
 fi

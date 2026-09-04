@@ -9,7 +9,7 @@ init_tpc_mode
 
 GEN_DATA_SCALE=$1
 session_id=$2
-# $3 is leftover EXPLAIN_ANALYZE from the unified arg list; 07 never uses it.
+# $3 is leftover from the unified arg list (was EXPLAIN_ANALYZE); 07 never uses it.
 EXCLUDE_HEAVY_QUERIES=$4
 SQL_ON_ERROR_STOP=$5
 DBNAME=$6

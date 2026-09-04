@@ -20,7 +20,7 @@ else
 	unset PGHOST
 fi
 
-if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SINGLE_USER" == "" || "$RUN_MULTI_USER" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
+if [[ "$GEN_DATA_SCALE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" || "$RUN_GEN_DATA" == "" || "$RUN_INIT" == "" || "$RUN_DDL" == "" || "$RUN_LOAD" == "" || "$RUN_SINGLE_USER" == "" || "$RUN_MULTI_USER" == "" || "$SINGLE_USER_ITERATIONS" == "" || "$DBNAME" == "" ]]; then
 	echo "Please run this script from tpc.sh so tpc_variables.sh is complete."
 	exit 1
 fi
@@ -125,7 +125,7 @@ echo ""
 echo "############################################################################"
 echo "TPC_MODE: $TPC_MODE"
 echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
-echo "EXPLAIN_ANALYZE: $EXPLAIN_ANALYZE  (05_sql only)"
+echo "SINGLE_EXPLAIN_ANALYZE_MODE: ${SINGLE_EXPLAIN_ANALYZE_MODE:-}  (05_sql only)"
 echo "RANDOM_DISTRIBUTION: $RANDOM_DISTRIBUTION"
 echo "MULTI_USER_COUNT: $MULTI_USER_COUNT"
 echo "RUN_GEN_DATA: $RUN_GEN_DATA"

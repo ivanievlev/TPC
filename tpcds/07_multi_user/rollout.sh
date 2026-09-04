@@ -8,8 +8,8 @@ source $PWD/../../parse_step_args.sh
 source $PWD/../../mode.sh
 init_tpc_mode
 
-if [[ "$GEN_DATA_SCALE" == "" || "$EXPLAIN_ANALYZE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" ]]; then
-	echo "Missing required parameters from tpc_variables.sh (scale, explain, random, multi-user count)."
+if [[ "$GEN_DATA_SCALE" == "" || "$RANDOM_DISTRIBUTION" == "" || "$MULTI_USER_COUNT" == "" ]]; then
+	echo "Missing required parameters from tpc_variables.sh (scale, random, multi-user count)."
 	exit 1
 fi
 validate_skip_queries_list "$SKIP_QUERIES_LIST"
@@ -77,8 +77,8 @@ if [ "$file_count" -ne "$MULTI_USER_COUNT" ]; then
 	session_pids=()
 	for x in $(seq 1 $MULTI_USER_COUNT); do
 		session_log=$PWD/../../log/testing_session_log/testing_session_$x.log
-		echo "$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
-		$PWD/test.sh $GEN_DATA_SCALE $x $EXPLAIN_ANALYZE $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST" > >(tee "$session_log") 2>&1 &
+		echo "$PWD/test.sh $GEN_DATA_SCALE $x unused $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN \"$SKIP_QUERIES_LIST\""
+		$PWD/test.sh $GEN_DATA_SCALE $x unused $EXCLUDE_HEAVY_QUERIES $SQL_ON_ERROR_STOP $DBNAME $STATEMENT_TIMEOUT $RUN_SQL_WITH_DUCKDB $DUCKDB_MEMORY_LIMIT $DUCKDB_THREADS $DUCKDB_MAX_WORKERS_PER_POSTGRES_SCAN $DUCKDB_THREADS_FOR_POSTGRES_SCAN "$SKIP_QUERIES_LIST" > >(tee "$session_log") 2>&1 &
 		session_pids+=($!)
 	done
 

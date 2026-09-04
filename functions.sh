@@ -637,6 +637,107 @@ sql_exit_if_query_error()
 	return 0
 }
 
+# 05_sql only. empty/false = plain SELECT; analyze = EXPLAIN ANALYZE; explain = EXPLAIN then SELECT.
+normalize_single_explain_analyze_mode()
+{
+	local m
+	if [ -z "${SINGLE_EXPLAIN_ANALYZE_MODE+x}" ]; then
+		case "$(printf '%s' "${EXPLAIN_ANALYZE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+			true|analyze) SINGLE_EXPLAIN_ANALYZE_MODE="analyze" ;;
+			explain) SINGLE_EXPLAIN_ANALYZE_MODE="explain" ;;
+			*) SINGLE_EXPLAIN_ANALYZE_MODE="" ;;
+		esac
+	fi
+	m=$(printf '%s' "${SINGLE_EXPLAIN_ANALYZE_MODE}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+	case "$m" in
+		""|false|off|no) SINGLE_EXPLAIN_ANALYZE_MODE="" ;;
+		analyze|true) SINGLE_EXPLAIN_ANALYZE_MODE="analyze" ;;
+		explain) SINGLE_EXPLAIN_ANALYZE_MODE="explain" ;;
+		*)
+			echo "ERROR: SINGLE_EXPLAIN_ANALYZE_MODE must be \"\", \"false\", \"analyze\", or \"explain\" (got: ${SINGLE_EXPLAIN_ANALYZE_MODE})"
+			exit 1
+			;;
+	esac
+}
+
+# One 05_sql file. Uses caller $i (path), schema_name, table_name. Duration is the SELECT
+# (or EXPLAIN ANALYZE in analyze mode); EXPLAIN-only is not timed.
+run_05_sql_query_file()
+{
+	local sql_outfile sql_errfile hostfile psql_rc myfilename mylogfile mode
+
+	mode="${SINGLE_EXPLAIN_ANALYZE_MODE:-}"
+	sql_outfile=$(mktemp)
+	sql_errfile=$(mktemp)
+	hostfile=$(mktemp)
+	psql_rc=0
+	myfilename=$(basename "$i")
+	mylogfile="${LOCAL_PWD}/log/single_explain_analyze_log/${myfilename}.single.explain_analyze.log"
+
+	case "$mode" in
+		analyze)
+			start_log
+			echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN ANALYZE\" -f $i > $mylogfile"
+			set +e
+			psql_run_sql_capturing_host "$i" "$mylogfile" "$sql_errfile" "$hostfile" "EXPLAIN ANALYZE"
+			psql_rc=$?
+			set -e
+			if [ -s "$sql_errfile" ]; then
+				cat "$sql_errfile" >&2
+			fi
+			tuples=$(tuples_from_explain_log "$mylogfile")
+			QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
+			log $tuples
+			sql_exit_if_query_error "$sql_outfile" "$sql_errfile" "$hostfile"
+			;;
+		explain)
+			echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"EXPLAIN\" -f $i > $mylogfile"
+			set +e
+			psql_run_sql_capturing_host "$i" "$mylogfile" "$sql_errfile" "$hostfile" "EXPLAIN"
+			psql_rc=$?
+			set -e
+			if [ -s "$sql_errfile" ]; then
+				cat "$sql_errfile" >&2
+			fi
+			QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
+			sql_exit_if_query_error "$sql_outfile" "$sql_errfile" "$hostfile"
+			: > "$sql_outfile"
+			: > "$sql_errfile"
+			: > "$hostfile"
+			start_log
+			echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
+			set +e
+			psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" ""
+			psql_rc=$?
+			set -e
+			if [ -s "$sql_errfile" ]; then
+				cat "$sql_errfile" >&2
+			fi
+			tuples=$(wc -l < "$sql_outfile" | tr -d ' ')
+			QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
+			log $tuples
+			sql_exit_if_query_error "$sql_outfile" "$sql_errfile" "$hostfile"
+			;;
+		*)
+			start_log
+			echo "psql -d $DBNAME -c \"$PSQL_SESSION_SETS\" -v ON_ERROR_STOP=$ON_ERROR_STOP -A -q -t -P pager=off -v EXPLAIN_ANALYZE=\"\" -f $i | wc -l"
+			set +e
+			psql_run_sql_capturing_host "$i" "$sql_outfile" "$sql_errfile" "$hostfile" ""
+			psql_rc=$?
+			set -e
+			if [ -s "$sql_errfile" ]; then
+				cat "$sql_errfile" >&2
+			fi
+			tuples=$(wc -l < "$sql_outfile" | tr -d ' ')
+			QUERY_STATUS=$(sql_query_status "$sql_errfile" "$psql_rc")
+			log $tuples
+			sql_exit_if_query_error "$sql_outfile" "$sql_errfile" "$hostfile"
+			;;
+	esac
+	unset QUERY_STATUS QUERY_BACKEND_HOST
+	rm -f "$sql_outfile" "$sql_errfile" "$hostfile"
+}
+
 kill_process_tree()
 {
 	local pid=$1
@@ -1940,15 +2041,12 @@ AWK
 }
 
 # SQL that creates TEMP TABLE tpc_explain_cost from log/single_explain_analyze_log.
-# Dash when EXPLAIN_ANALYZE is off, DuckDB, or the plan has no native cost.
+# Dash when DuckDB, or the plan has no native cost. Missing logs → no rows (report coalesces to '-').
 emit_tpc_explain_cost_sql()
 {
 	local dir f qid cost started=0
 
 	echo "CREATE TEMP TABLE tpc_explain_cost (id text PRIMARY KEY, cost text);"
-	if [ "${EXPLAIN_ANALYZE:-false}" != "true" ]; then
-		return 0
-	fi
 	dir="${LOCAL_PWD}/log/single_explain_analyze_log"
 	[ -d "$dir" ] || return 0
 

@@ -78,7 +78,7 @@ See `tpc_variables.sh` for the full list (section order: Generic, Steps, Postgre
 - ADMIN_USER="postgres"
 - DAT_FILE_DIRECTORY_PATH="/tmp"
 - EXTERNAL_FILE_DIRECTORY_PATH="/tmp"
-- EXPLAIN_ANALYZE="false"
+- SINGLE_EXPLAIN_ANALYZE_MODE=""
 - RANDOM_DISTRIBUTION="false"
 - MULTI_USER_COUNT="10"
 - GEN_DATA_SCALE="3000"

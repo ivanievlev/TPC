@@ -16,7 +16,7 @@ MULTI_USER_COUNT="5"  # Number of concurrent query streams in the 07_multi_user 
 SINGLE_USER_ITERATIONS="1"  # How many times to repeat the single-user query stream.
 DAT_FILE_DIRECTORY_PATH="/tmp"  # Absolute root for generated .dat / .tbl files (relative path ../datfiles is hardcoded).
 EXTERNAL_FILE_DIRECTORY_PATH="/tmp"  # Absolute root for parquet/csv/json trees.
-EXPLAIN_ANALYZE="false"  # Prefix 05_sql statements with EXPLAIN ANALYZE; ignored by 07_multi_user.
+SINGLE_EXPLAIN_ANALYZE_MODE=""  # 05_sql only: empty/false=plain SELECT; analyze=EXPLAIN ANALYZE; explain=EXPLAIN then SELECT. Ignored by 07_multi_user.
 RANDOM_DISTRIBUTION="false"  # Greenplum: distribute tables randomly instead of the default keys.
 EMPTY_SCHEMAS_CNT="0"  # Extra empty schemas (tpcdsN / tpchN) created for catalog stress.
 TRUNCATE_BEFORE_LOAD="true"  # Truncate heap tables (or wipe the current external tree) before load.

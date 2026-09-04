@@ -170,9 +170,25 @@ check_variables()
 		echo "EXTERNAL_FILE_DIRECTORY_PATH=\"/tmp\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
-	local count=$(grep "EXPLAIN_ANALYZE=" $MYVAR | wc -l)
+	if grep -q '^EXPLAIN_ANALYZE=' "$MYVAR" 2>/dev/null && ! grep -q '^SINGLE_EXPLAIN_ANALYZE_MODE=' "$MYVAR" 2>/dev/null; then
+		_old_ea=$(grep '^EXPLAIN_ANALYZE=' "$MYVAR" | tail -1 | sed 's/^EXPLAIN_ANALYZE=//; s/#.*//; s/["[:space:]]//g')
+		case "$(echo "$_old_ea" | tr '[:upper:]' '[:lower:]')" in
+			true|analyze) _new_ea="analyze" ;;
+			explain) _new_ea="explain" ;;
+			*) _new_ea="" ;;
+		esac
+		echo "SINGLE_EXPLAIN_ANALYZE_MODE=\"${_new_ea}\"  # 05_sql only: empty/false=plain SELECT; analyze=EXPLAIN ANALYZE; explain=EXPLAIN then SELECT" >> "$MYVAR"
+		sed -i '/^EXPLAIN_ANALYZE=/d' "$MYVAR"
+		unset _old_ea _new_ea
+		new_variable=$(($new_variable + 1))
+	fi
+	if grep -q '^EXPLAIN_ANALYZE=' "$MYVAR" 2>/dev/null; then
+		sed -i '/^EXPLAIN_ANALYZE=/d' "$MYVAR"
+		new_variable=$(($new_variable + 1))
+	fi
+	local count=$(grep "SINGLE_EXPLAIN_ANALYZE_MODE=" $MYVAR | wc -l)
 	if [ "$count" -eq "0" ]; then
-		echo "EXPLAIN_ANALYZE=\"false\"  # affects only 05_sql (single-user) and ignored by 07_multi_user" >> $MYVAR
+		echo "SINGLE_EXPLAIN_ANALYZE_MODE=\"\"  # 05_sql only: empty/false=plain SELECT; analyze=EXPLAIN ANALYZE; explain=EXPLAIN then SELECT" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
 	local count=$(grep "RANDOM_DISTRIBUTION=" $MYVAR | wc -l)
@@ -756,7 +772,7 @@ echo_variables()
 	echo "REPO_BRANCH: $REPO_BRANCH"
 	echo "TPC_MODE: $TPC_MODE"
 	echo "GEN_DATA_SCALE: $GEN_DATA_SCALE"
-	echo "EXPLAIN_ANALYZE: $EXPLAIN_ANALYZE"
+	echo "SINGLE_EXPLAIN_ANALYZE_MODE: $SINGLE_EXPLAIN_ANALYZE_MODE"
 	echo "RUN_GEN_DATA: $RUN_GEN_DATA"
 	echo "RUN_INIT: $RUN_INIT"
 	echo "RUN_DDL: $RUN_DDL"
