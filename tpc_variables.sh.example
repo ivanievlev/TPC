@@ -53,6 +53,7 @@ EXTERNAL_FILE_SIZE_BYTES="-1"  # DuckDB FILE_SIZE_BYTES for COPY; -1 writes a si
 EXTERNAL_COMPRESSION="false"  # DuckDB COMPRESSION codec for COPY, or false to omit it.
 PURGE_OLD_EXTERNAL_DATA="true"  # Delete previous tpcds_*/tpch_* parquet/csv/json trees before load.
 APPLY_PGCONFIG_PARAMETERS="false"  # Apply pgconfig.org ALTER SYSTEM recommendations and restart Postgres.
+USE_HOT_STANDBY_FEEDBACK="true"  # When true, 02_init sets hot_standby_feedback=on and both max_standby_*_delay to STATEMENT_TIMEOUT.
 
 ##############################################################################
 # Greenplum-specific

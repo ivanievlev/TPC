@@ -86,6 +86,9 @@ fi
 if [ -z "$APPLY_PGCONFIG_PARAMETERS" ]; then
 	APPLY_PGCONFIG_PARAMETERS="false"
 fi
+if [ -z "$USE_HOT_STANDBY_FEEDBACK" ]; then
+	USE_HOT_STANDBY_FEEDBACK="true"
+fi
 
 if [ -z "${DAT_FILE_DIRECTORY_PATH:-}" ]; then
 	DAT_FILE_DIRECTORY_PATH="/tmp"

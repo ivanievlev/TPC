@@ -1397,6 +1397,23 @@ _patroni_list_json()
 	printf '%s\n' "$json"
 }
 
+# Run patronictl -c YAML ... as the current user, else sudo -n -u ADMIN_USER.
+_patroni_ctl_exec()
+{
+	local yaml="$1"
+	shift
+	local ctl user
+	ctl=$(_patroni_ctl_bin || true)
+	[ -n "$ctl" ] && [ -n "$yaml" ] || return 1
+	if [ -r "$yaml" ] && [ -x "$ctl" ]; then
+		if "$ctl" -c "$yaml" "$@"; then
+			return 0
+		fi
+	fi
+	user="${ADMIN_USER:-postgres}"
+	sudo -n -u "$user" -H "$ctl" -c "$yaml" "$@"
+}
+
 # Prints "member|host" for the Patroni Leader (or empty / exit 1).
 _patroni_leader_ident()
 {
@@ -1603,11 +1620,71 @@ EOF
 	return 0
 }
 
+# Replica query vs WAL apply: hot_standby_feedback + max_standby_*_delay = STATEMENT_TIMEOUT.
+# Patroni: DCS postgresql.parameters (replicas do not inherit ALTER SYSTEM from the leader).
+# Standalone: ALTER SYSTEM + pg_reload_conf (SIGHUP; no restart).
+apply_hot_standby_feedback()
+{
+	local delay delay_sql yaml cluster
+
+	get_version
+	if [[ "$VERSION" == *"gpdb"* ]]; then
+		echo "USE_HOT_STANDBY_FEEDBACK: skipped (Greenplum)"
+		return 0
+	fi
+
+	if [ "${USE_HOT_STANDBY_FEEDBACK:-true}" != "true" ]; then
+		echo "USE_HOT_STANDBY_FEEDBACK=false: leaving hot_standby_feedback and max_standby_*_delay unchanged"
+		return 0
+	fi
+
+	delay=$(printf '%s' "${STATEMENT_TIMEOUT:-1h}" | tr -d '[:space:]')
+	if [ -z "$delay" ]; then
+		echo "ERROR: USE_HOT_STANDBY_FEEDBACK=true requires STATEMENT_TIMEOUT"
+		return 1
+	fi
+	delay_sql=${delay//\'/\'\'}
+
+	echo "############################################################################"
+	echo "USE_HOT_STANDBY_FEEDBACK: hot_standby_feedback=on, max_standby_*_delay=$delay"
+	echo "############################################################################"
+
+	yaml=$(_patroni_yaml_path || true)
+	if [ -n "$yaml" ]; then
+		cluster=$(_patroni_yaml_top_scalar "scope" "$yaml")
+		cluster=$(echo "$cluster" | tr -d '[:space:]')
+		if [ -z "$cluster" ]; then
+			echo "ERROR: Patroni yaml $yaml has no top-level scope: (needed for patronictl edit-config)"
+			return 1
+		fi
+		echo "USE_HOT_STANDBY_FEEDBACK: patronictl edit-config $cluster --pg hot_standby_feedback=on --pg max_standby_*_delay=$delay"
+		if ! _patroni_ctl_exec "$yaml" edit-config "$cluster" --force \
+			--pg hot_standby_feedback=on \
+			--pg "max_standby_streaming_delay=$delay" \
+			--pg "max_standby_archive_delay=$delay"
+		then
+			echo "ERROR: patronictl edit-config failed; replica GUCs were not applied"
+			return 1
+		fi
+		psql -d postgres -v ON_ERROR_STOP=0 -c "SELECT pg_reload_conf();" >/dev/null 2>&1 || true
+	else
+		echo "USE_HOT_STANDBY_FEEDBACK: no Patroni; ALTER SYSTEM + pg_reload_conf on this instance"
+		psql -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET hot_standby_feedback TO 'on';"
+		psql -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET max_standby_streaming_delay TO '$delay_sql';"
+		psql -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET max_standby_archive_delay TO '$delay_sql';"
+		psql -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_reload_conf();"
+	fi
+
+	psql -d postgres -v ON_ERROR_STOP=0 -c "SELECT name, setting FROM pg_settings WHERE name IN ('hot_standby_feedback','max_standby_streaming_delay','max_standby_archive_delay') ORDER BY name;"
+	return 0
+}
+
 # When APPLY_PGCONFIG_PARAMETERS=true, fetch recommended GUCs from
 # https://api.pgconfig.org for this host's CPU/RAM/disk and apply them
 # with ALTER SYSTEM + PostgreSQL restart. PostgreSQL only.
-# DuckDB instance GUCs are applied here as well (ALTER DATABASE, no extra restart).
-# When false, leave postgresql.conf unchanged but still apply DuckDB database GUCs.
+# DuckDB instance GUCs and USE_HOT_STANDBY_FEEDBACK replica GUCs are applied here
+# as well (no extra restart unless pgconfig itself requested one).
+# When false, leave postgresql.conf unchanged but still apply those GUCs.
 apply_pgconfig_parameters()
 {
 	local need_restart=0
@@ -1745,6 +1822,7 @@ apply_pgconfig_parameters()
 	fi
 
 	apply_duckdb_database_gucs || return 1
+	apply_hot_standby_feedback || return 1
 
 	if [ "$need_restart" -eq 1 ]; then
 		pgconfig_restart_postgres
@@ -1773,6 +1851,8 @@ log_postgres_test_parameters()
 		echo "############################################################################"
 		echo "PostgreSQL parameters for this test run"
 		echo "APPLY_PGCONFIG_PARAMETERS=${APPLY_PGCONFIG_PARAMETERS:-false}"
+		echo "USE_HOT_STANDBY_FEEDBACK=${USE_HOT_STANDBY_FEEDBACK:-true}"
+		echo "STATEMENT_TIMEOUT=${STATEMENT_TIMEOUT:-}"
 		echo "RUN_SQL_WITH_DUCKDB=${RUN_SQL_WITH_DUCKDB:-false}"
 		echo "PGPORT_WRITE=${PGPORT_WRITE:-5432} PGPORT_SELECT=${PGPORT_SELECT:-5432} PGPORT=${PGPORT:-5432} PGHOST=${PGHOST:-}"
 		echo "############################################################################"
@@ -1781,6 +1861,9 @@ log_postgres_test_parameters()
 		else
 			psql -d "$db" -v ON_ERROR_STOP=0 -c "SELECT sourcefile, name, setting FROM pg_file_settings WHERE sourcefile LIKE '%postgresql.auto.conf' ORDER BY name;"
 		fi
+		echo "############################################################################"
+		echo "hot_standby_feedback / max_standby_*_delay (SHOW):"
+		psql -d "$db" -v ON_ERROR_STOP=0 -c "SELECT name, setting FROM pg_settings WHERE name IN ('hot_standby_feedback','max_standby_streaming_delay','max_standby_archive_delay') ORDER BY name;"
 		echo "############################################################################"
 		if [ "${RUN_SQL_WITH_DUCKDB:-false}" = "true" ]; then
 			echo "DuckDB database GUCs (SHOW):"

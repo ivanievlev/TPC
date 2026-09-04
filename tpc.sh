@@ -458,6 +458,11 @@ check_variables()
 		echo "APPLY_PGCONFIG_PARAMETERS=\"false\"" >> $MYVAR
 		new_variable=$(($new_variable + 1))
 	fi
+	local count=$(grep "USE_HOT_STANDBY_FEEDBACK" $MYVAR | wc -l)
+	if [ "$count" -eq "0" ]; then
+		echo "USE_HOT_STANDBY_FEEDBACK=\"true\"  # 02_init: hot_standby_feedback=on and max_standby_*_delay=STATEMENT_TIMEOUT" >> $MYVAR
+		new_variable=$(($new_variable + 1))
+	fi
 
 	if [ "$new_variable" -gt "0" ]; then
 		echo "There are new variables in the tpc_variables.sh file.  Please review to ensure the values are correct and then re-run this script."
@@ -801,6 +806,7 @@ echo_variables()
 	echo "COLLECT_OS_DATA: $COLLECT_OS_DATA"
 	echo "COLLECT_DATA_PERIOD: $COLLECT_DATA_PERIOD"
 	echo "APPLY_PGCONFIG_PARAMETERS: $APPLY_PGCONFIG_PARAMETERS"
+	echo "USE_HOT_STANDBY_FEEDBACK: $USE_HOT_STANDBY_FEEDBACK"
 	echo "PURGE_OLD_EXTERNAL_DATA: $PURGE_OLD_EXTERNAL_DATA"
 	echo "KILL_PREVIOUS_PROCESSES: $KILL_PREVIOUS_PROCESSES"
 	echo "############################################################################"
