@@ -540,6 +540,41 @@ tuples_from_explain_log()
 	echo "$total"
 }
 
+# Planner total cost from a native EXPLAIN ANALYZE log (root cost=startup..total).
+# DuckDB plans and missing/empty logs yield "-".
+explain_analyze_total_cost_from_log()
+{
+	local f=$1
+
+	if [ ! -f "$f" ] || [ ! -s "$f" ]; then
+		echo "-"
+		return
+	fi
+
+	awk '
+		BEGIN { duck=0; sum=0; found=0 }
+		/DuckDB Execution Plan/ { duck=1 }
+		/^Custom Scan \(DuckDBScan\)/ { duck=1 }
+		/^[^[:space:]].*\(cost=/ {
+			if (match($0, /cost=[0-9]+(\.[0-9]+)?\.\.[0-9]+(\.[0-9]+)?/)) {
+				s = substr($0, RSTART, RLENGTH)
+				n = split(s, a, /\.\./)
+				if (n >= 2) {
+					sum += a[2] + 0
+					found++
+				}
+			}
+		}
+		END {
+			if (duck || !found) {
+				print "-"
+				exit
+			}
+			printf "%.2f\n", sum
+		}
+	' "$f"
+}
+
 # Classify SQL run from psql stderr + exit code → query_status for reports.
 # statement_timeout is "cancelled due to timeout", not ERROR:* (SQL_ON_ERROR_STOP
 # aborts only on ERROR:*).
@@ -1815,6 +1850,45 @@ END {
 AWK
 }
 
+# SQL that creates TEMP TABLE tpc_explain_cost from log/single_explain_analyze_log.
+# Dash when EXPLAIN_ANALYZE is off, DuckDB, or the plan has no native cost.
+emit_tpc_explain_cost_sql()
+{
+	local dir f qid cost started=0
+
+	echo "CREATE TEMP TABLE tpc_explain_cost (id text PRIMARY KEY, cost text);"
+	if [ "${EXPLAIN_ANALYZE:-false}" != "true" ]; then
+		return 0
+	fi
+	dir="${LOCAL_PWD}/log/single_explain_analyze_log"
+	[ -d "$dir" ] || return 0
+
+	for f in "$dir"/*.single.explain_analyze.log; do
+		[ -e "$f" ] || continue
+		qid=$(basename "$f" | awk -F. '{print $3}')
+		if ! [[ "$qid" =~ ^[0-9]+$ ]]; then
+			continue
+		fi
+		qid=$(printf '%02d' "$((10#$qid))")
+		if [ "${RUN_SQL_WITH_DUCKDB:-false}" = "true" ]; then
+			cost="-"
+		else
+			cost=$(explain_analyze_total_cost_from_log "$f")
+		fi
+		cost=${cost//\'/\'\'}
+		if [ "$started" -eq 0 ]; then
+			echo "INSERT INTO tpc_explain_cost (id, cost) VALUES"
+			started=1
+			printf "('%s', '%s')" "$qid" "$cost"
+		else
+			printf ",\n('%s', '%s')" "$qid" "$cost"
+		fi
+	done
+	if [ "$started" -eq 1 ]; then
+		echo ";"
+	fi
+}
+
 # Run a report SQL file after loading query labels from templates.lst.
 # Extra args are passed to psql (e.g. -P pager=off -P format=aligned -P border=1).
 psql_report_with_query_labels()
@@ -1825,6 +1899,7 @@ psql_report_with_query_labels()
 	local tmp
 	tmp=$(mktemp)
 	emit_tpc_query_labels_sql "$lst" > "$tmp"
+	emit_tpc_explain_cost_sql >> "$tmp"
 	psql -d "$DBNAME" -v ON_ERROR_STOP=1 "$@" -f "$tmp" -f "$sqlfile"
 	rm -f "$tmp"
 }

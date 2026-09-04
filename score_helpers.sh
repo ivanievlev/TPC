@@ -418,6 +418,30 @@ where tuples = 0
 	fi
 }
 
+# Single-user query list with planner cost from log/single_explain_analyze_log.
+print_score_single_user_queries()
+{
+	local root lst sql
+
+	if [ "${RUN_SINGLE_USER:-false}" != "true" ]; then
+		return 0
+	fi
+	root="${LOCAL_PWD}"
+	if [ "$TPC_MODE" = "TPC-H" ]; then
+		lst="$root/tpch/00_compile_tpch/dbgen/queries/templates.lst"
+		sql="$root/tpch/06_single_user_reports/queries_report.sql"
+	else
+		lst="$root/tpcds/00_compile_tpcds/query_templates/templates.lst"
+		sql="$root/tpcds/06_single_user_reports/queries_report.sql"
+	fi
+	if [ ! -f "$sql" ]; then
+		return 0
+	fi
+	echo ""
+	printf "%-36s %14s\n" "---- 05_sql queries ----" ""
+	psql_report_with_query_labels "$lst" "$sql" -P pager=off -P format=aligned -P border=1
+}
+
 # Parse duration like STATEMENT_TIMEOUT: 5s, 1min, 1m, 2h, 500ms → integer seconds (>=1).
 parse_duration_to_seconds()
 {

@@ -20,6 +20,7 @@ step="score"
 init_log $step
 
 print_tpc_score
+print_score_single_user_queries
 echo ""
 print_extended_score_metrics "$TPC_REPORT_SCHEMA" "$TPC_TESTING_SCHEMA"
 
