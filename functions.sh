@@ -570,7 +570,13 @@ explain_analyze_total_cost_from_log()
 				print "-"
 				exit
 			}
-			printf "%.2f\n", sum
+			s = sprintf("%d", int(sum))
+			out = ""
+			while (length(s) > 3) {
+				out = "," substr(s, length(s) - 2) out
+				s = substr(s, 1, length(s) - 3)
+			}
+			print s out
 		}
 	' "$f"
 }
